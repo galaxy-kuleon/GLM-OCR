@@ -176,3 +176,4 @@ data/
 /apps/frontend/dist/
 *.pid
 .DS_Store
+examples-pdf/

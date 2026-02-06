@@ -61,16 +61,16 @@ pipeline:
   ocr_api:
     # Basic connection
     api_host: 127.0.0.1
-    api_port: 8080
+    api_port: 11434
 
     # Model name included in API requests.
     # Required for mlx_vlm.server (e.g. "mlx-community/GLM-OCR-bf16").
     # Set to `glm-ocr` to match `--served-model-name` when using vLLM/SGLang
-    model: glm-ocr
+    model: "glm-ocr:bf16"
 
     # URL construction: {api_scheme}://{api_host}:{api_port}{api_path}
     # Or set api_url directly to override
-    api_scheme: null # null = auto (https if port 443, else http)
+    api_scheme: http # null = auto (https if port 443, else http)
     api_path: /v1/chat/completions
     api_url: null # full URL override (optional)
 
@@ -82,8 +82,8 @@ pipeline:
     verify_ssl: false
 
     # Timeouts (seconds)
-    connect_timeout: 30
-    request_timeout: 120
+    connect_timeout: 60
+    request_timeout: 600
 
     # Retry settings (helps with transient 429/5xx and overloaded OCR servers)
     retry_max_attempts: 2
@@ -94,11 +94,12 @@ pipeline:
 
     # HTTP connection pool size (default 128). Set >= max_workers to avoid
     # "Connection pool is full" when layout mode runs concurrent requests.
-    connection_pool_size: 128
+    connection_pool_size: 4
 
   # Maximum parallel workers for region recognition (layout mode)
   # Lower values to reduce 503 errors on busy OCR servers
-  max_workers: 32
+  # Ollama typically handles 1 request at a time; keep low to avoid overload
+  max_workers: 1
   # Queue sizes
   page_maxsize: 100
   region_maxsize: 800

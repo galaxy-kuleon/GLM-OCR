@@ -180,6 +180,8 @@ class OCRClient:
                                 "max_tokens": 10,
                                 "temperature": 0.1,
                             }
+                            if self.model:
+                                test_payload["model"] = self.model
                             headers = {
                                 "Content-Type": "application/json",
                                 **self.extra_headers,
