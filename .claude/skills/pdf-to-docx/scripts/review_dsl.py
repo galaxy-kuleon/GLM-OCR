@@ -208,7 +208,7 @@ def call_poe_review(api_key, page_image_b64, xml_content):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=120)
+    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()
@@ -281,7 +281,7 @@ def call_poe_review_multi(api_key, page_images_b64, xml_contents, page_numbers):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=180)
+    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()

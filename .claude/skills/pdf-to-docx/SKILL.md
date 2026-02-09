@@ -154,16 +154,16 @@ Image files are named `cropped_page{N}_idx{M}.jpg` where:
 
 ### Native label categories
 
-| native_label        | label   | Meaning                                           |
-| ------------------- | ------- | ------------------------------------------------- |
-| `doc_title`         | text    | Document title (H1), content prefixed with `# `   |
-| `paragraph_title`   | text    | Section heading (H2), content prefixed with `## ` |
-| `text`              | text    | Body paragraph                                    |
-| `figure_title`      | text    | Figure/image caption                              |
-| `vision_footnote`   | text    | Footnote/endnote                                  |
-| `table`             | table   | Table (HTML in content)                           |
-| `display_formula`   | formula | Display math (LaTeX)                              |
-| `image`             | image   | Image (content is null)                           |
+| native_label      | label   | Meaning                                           |
+| ----------------- | ------- | ------------------------------------------------- |
+| `doc_title`       | text    | Document title (H1), content prefixed with `# `   |
+| `paragraph_title` | text    | Section heading (H2), content prefixed with `## ` |
+| `text`            | text    | Body paragraph                                    |
+| `figure_title`    | text    | Figure/image caption                              |
+| `vision_footnote` | text    | Footnote/endnote                                  |
+| `table`           | table   | Table (HTML in content)                           |
+| `display_formula` | formula | Display math (LaTeX)                              |
+| `image`           | image   | Image (content is null)                           |
 
 ---
 
@@ -208,7 +208,7 @@ uv run --with requests,Pillow \
     "alignment": "left",
     "th": true,
     "cell_overrides": {
-      "col_colors": [{"col": 5, "c": [204, 0, 0], "type": "text"}],
+      "col_colors": [{ "col": 5, "c": [204, 0, 0], "type": "text" }],
       "row_colors": [],
       "cell_colors": []
     }
@@ -228,6 +228,7 @@ uv run --with requests,Pillow \
 ```
 
 Additional optional fields:
+
 - `tb` (boolean) — region is inside a text box or bordered frame
 - `bd` (boolean) — text box has a visible border (only meaningful when `tb=true`)
 - `bg_rgb` ([R,G,B]) — paragraph/heading background shading color (only if non-white)
@@ -293,9 +294,9 @@ uv run --with requests,lxml,Pillow \
 
 **What this does**: Compares XML DSL against page images using Poe AI.
 
-**Multi-page mode** (≤5 pages): All page PNGs + all XML DSLs are sent in a single API call. This enables cross-page consistency checking (font sizes, colors, column widths). The VLM responds with a JSON object keyed by page number. Timeout is 180 seconds for multi-image calls.
+**Multi-page mode** (≤5 pages): All page PNGs + all XML DSLs are sent in a single API call. This enables cross-page consistency checking (font sizes, colors, column widths). The VLM responds with a JSON object keyed by page number. Timeout is 300 seconds for multi-image calls.
 
-**Per-page fallback** (>5 pages or multi-page failure): Each page is reviewed independently in separate API calls with 120-second timeout.
+**Per-page fallback** (>5 pages or multi-page failure): Each page is reviewed independently in separate API calls with 300-second timeout.
 
 Output: `$WORKSPACE/dsl/review-page-{N}.json` (per page, regardless of mode)
 
@@ -333,6 +334,7 @@ uv run --with python-docx,lxml,Pillow \
 **Deterministic**: Same XML always produces the same DOCX. No dynamic code generation.
 
 If the script fails, read the error and check:
+
 - Are all `<image src="...">` paths valid?
 - Are XML files well-formed?
 - Fix any issues in the XML files and re-run.
@@ -351,6 +353,7 @@ uv run --with requests,Pillow \
 ```
 
 **What this does**:
+
 1. Converts output.docx → PDF via soffice
 2. Renders PDF → PNGs at 200 DPI (docx-rendered-pngs/)
 3. Detects page count mismatch (input PDF pages vs DOCX-rendered pages)
@@ -364,6 +367,7 @@ Output: `$WORKSPACE/dsl/visual-review-page-{N}.json` (N = input page number)
 ### Handle visual review results
 
 For each page with non-empty issues:
+
 1. Read `visual-review-page-{N}.json`
 2. If `page_count_mismatch` is present, investigate root cause (font size too large, table too wide, margins wrong) and fix in `page-{N}.xml`
 3. Analyze other differences and edit `page-{N}.xml`
@@ -423,6 +427,7 @@ done
 ### 7c. Fix and re-generate if needed
 
 If issues are found:
+
 1. Edit the corresponding `page-{N}.xml` files
 2. Re-run Step 6: `dsl_to_docx.py`
 
@@ -433,6 +438,7 @@ cp "$WORKSPACE/output.docx" "$WORKSPACE/final-output.docx"
 ```
 
 Report to the user:
+
 - Final DOCX location: `$WORKSPACE/final-output.docx`
 - Number of pages processed
 - Summary of any remaining issues
@@ -508,28 +514,28 @@ $WORKSPACE/
 
 ### Element types
 
-| XML Element | python-docx Operation | Source |
-|-------------|----------------------|--------|
-| `<heading level="N">` | `doc.add_heading("", N)` + black color | doc_title→1, paragraph_title→2 |
-| `<paragraph>` | `doc.add_paragraph(style=...)` | native_label mapping |
-| `<run>` | `para.add_run()` + font/color/bold/italic | style JSON + markdown |
-| `<table>` | `doc.add_table()` + occupancy grid merge | OCR HTML table |
-| `<cell>` | cell text + shading + borders; may contain `<run>` children for keyword-level styling | style defaults + keyword_styles |
-| `<image>` | `doc.add_picture()` + bbox scaling | sequential counter |
-| `<text-frame>` | `w:framePr` + `w:pBdr` (TWIPS) | bbox + floating detection |
-| `<side-by-side>` | invisible table `w:val="none"` | parallel layout detection |
+| XML Element           | python-docx Operation                                                                 | Source                          |
+| --------------------- | ------------------------------------------------------------------------------------- | ------------------------------- |
+| `<heading level="N">` | `doc.add_heading("", N)` + black color                                                | doc_title→1, paragraph_title→2  |
+| `<paragraph>`         | `doc.add_paragraph(style=...)`                                                        | native_label mapping            |
+| `<run>`               | `para.add_run()` + font/color/bold/italic                                             | style JSON + markdown           |
+| `<table>`             | `doc.add_table()` + occupancy grid merge                                              | OCR HTML table                  |
+| `<cell>`              | cell text + shading + borders; may contain `<run>` children for keyword-level styling | style defaults + keyword_styles |
+| `<image>`             | `doc.add_picture()` + bbox scaling                                                    | sequential counter              |
+| `<text-frame>`        | `w:framePr` + `w:pBdr` (TWIPS)                                                        | bbox + floating detection       |
+| `<side-by-side>`      | invisible table `w:val="none"`                                                        | parallel layout detection       |
 
 ### Run attributes (all optional)
 
-| Attribute | Default | Description |
-|-----------|---------|-------------|
-| `font-size-pt` | `11` | Font size |
-| `bold` | `false` | Bold |
-| `italic` | `false` | Italic |
-| `underline` | `false` | Underline |
-| `color-rgb` | `0,0,0` | Text color R,G,B |
-| `superscript` | `false` | Superscript |
-| `font-name` | (inherits page font) | Font name |
+| Attribute      | Default              | Description      |
+| -------------- | -------------------- | ---------------- |
+| `font-size-pt` | `11`                 | Font size        |
+| `bold`         | `false`              | Bold             |
+| `italic`       | `false`              | Italic           |
+| `underline`    | `false`              | Underline        |
+| `color-rgb`    | `0,0,0`              | Text color R,G,B |
+| `superscript`  | `false`              | Superscript      |
+| `font-name`    | (inherits page font) | Font name        |
 
 ## Known Issues & Lessons Learned
 

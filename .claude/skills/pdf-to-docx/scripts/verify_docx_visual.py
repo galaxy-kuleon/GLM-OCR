@@ -238,7 +238,7 @@ def find_input_page_png(workspace, page_num):
     return None
 
 
-def call_poe_visual_compare(api_key, content_parts, system_prompt, timeout=180):
+def call_poe_visual_compare(api_key, content_parts, system_prompt, timeout=300):
     """Call Poe AI for visual comparison."""
     if requests is None:
         raise RuntimeError("requests library not available")

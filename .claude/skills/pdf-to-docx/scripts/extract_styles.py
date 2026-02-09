@@ -345,7 +345,7 @@ def call_poe_table_cell_styles(api_key, page_image_b64, num_rows, num_cols):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=120)
+    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()
@@ -433,7 +433,7 @@ def call_poe_api(api_key, page_image_b64, regions_summary):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=120)
+    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()

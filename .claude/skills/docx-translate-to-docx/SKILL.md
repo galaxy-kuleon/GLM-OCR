@@ -115,27 +115,38 @@ The generated script must:
    - User prompt includes: current page's text content as JSON array
 
    Input format per page:
+
    ```json
    [
-     {"xpath": "heading[1]/run[1]", "text": "文件標題"},
-     {"xpath": "paragraph[1]/run[1]", "text": "一般文字"},
-     {"xpath": "table[1]/row[0]/cell[0]", "text": "表頭1"},
-     {"xpath": "table[1]/row[1]/cell[2]/run[0]", "text": "關鍵字"},
-     {"xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]", "text": "左欄文字"}
+     { "xpath": "heading[1]/run[1]", "text": "文件標題" },
+     { "xpath": "paragraph[1]/run[1]", "text": "一般文字" },
+     { "xpath": "table[1]/row[0]/cell[0]", "text": "表頭1" },
+     { "xpath": "table[1]/row[1]/cell[2]/run[0]", "text": "關鍵字" },
+     {
+       "xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]",
+       "text": "左欄文字"
+     }
    ]
    ```
 
    Note: `<run is-math="true">` elements are excluded — math/formula content is never sent for translation.
 
    Expected output:
+
    ```json
    {
      "translations": [
-       {"xpath": "heading[1]/run[1]", "translated_text": "Document Title"},
-       {"xpath": "paragraph[1]/run[1]", "translated_text": "Normal text"},
-       {"xpath": "table[1]/row[0]/cell[0]", "translated_text": "Header 1"},
-       {"xpath": "table[1]/row[1]/cell[2]/run[0]", "translated_text": "Keyword"},
-       {"xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]", "translated_text": "Left column text"}
+       { "xpath": "heading[1]/run[1]", "translated_text": "Document Title" },
+       { "xpath": "paragraph[1]/run[1]", "translated_text": "Normal text" },
+       { "xpath": "table[1]/row[0]/cell[0]", "translated_text": "Header 1" },
+       {
+         "xpath": "table[1]/row[1]/cell[2]/run[0]",
+         "translated_text": "Keyword"
+       },
+       {
+         "xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]",
+         "translated_text": "Left column text"
+       }
      ]
    }
    ```
@@ -150,7 +161,7 @@ The generated script must:
    - Save to `$WORKSPACE/dsl-translated/page-{N}.xml`
 
 4. **Error handling**:
-   - Timeout: 120 seconds per API call
+   - Timeout: 300 seconds per API call
    - Retry: up to 2 retries per page on failure
    - Use `response_format` with `json_schema` for structured output if model supports it
    - If structured output fails, fall back to manual JSON parsing
@@ -158,6 +169,7 @@ The generated script must:
 ### Prompt template
 
 Read the prompt template from `translation-prompt.md` (located in the same skill directory as this file) and fill in the template variables:
+
 - `{target_language}` → `TARGET_LANG`
 - `{style_notes}` → `STYLE_NOTES` or empty
 - `{full_document_markdown}` → content of `input.md`
@@ -238,9 +250,9 @@ $WORKSPACE/
 
 ## Advantages Over Previous Approach
 
-| Previous | New |
-|----------|-----|
-| Find and modify `assemble_docx.py` | Operate on XML text nodes |
-| Remove hardcoded text checks | No hardcoded checks in fixed scripts |
-| Generate new assembly script | Use fixed `dsl_to_docx.py` with `--dsl-dir` |
+| Previous                                      | New                                           |
+| --------------------------------------------- | --------------------------------------------- |
+| Find and modify `assemble_docx.py`            | Operate on XML text nodes                     |
+| Remove hardcoded text checks                  | No hardcoded checks in fixed scripts          |
+| Generate new assembly script                  | Use fixed `dsl_to_docx.py` with `--dsl-dir`   |
 | Fragile: depends on assembly script structure | Robust: XML text replacement is deterministic |
