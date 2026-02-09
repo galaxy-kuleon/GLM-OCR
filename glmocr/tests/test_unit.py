@@ -107,6 +107,62 @@ class TestPageLoader:
         pages = loader.load_pages(pdf_uri)
         assert len(pages) >= 1
 
+    def test_iter_pages_with_unit_indices_pdf_and_multi_source(self):
+        """Streaming: pages yielded incrementally; unit indices correct for multi-source."""
+        from glmocr.config import PageLoaderConfig
+        from glmocr.dataloader import PageLoader
+        from glmocr.utils.image_utils import PYPDFIUM2_AVAILABLE
+
+        if not PYPDFIUM2_AVAILABLE:
+            pytest.skip("pypdfium2 is not installed")
+
+        repo_root = Path(__file__).resolve().parents[2]
+        source_dir = repo_root / "examples" / "source"
+        if not source_dir.exists():
+            pytest.skip(f"No source dir: {source_dir}")
+
+        sample_pdf = next(
+            (f for f in source_dir.iterdir() if f.suffix.lower() == ".pdf"),
+            None,
+        )
+        sample_image = next(
+            (f for f in source_dir.iterdir() if f.suffix.lower() in (".png", ".jpg")),
+            None,
+        )
+        if not sample_pdf or not sample_pdf.exists():
+            pytest.skip(f"No sample PDF in {source_dir}")
+
+        loader = PageLoader(PageLoaderConfig())
+
+        # (1) Single PDF: pages yielded incrementally, same count as load_pages
+        expected_pages, _ = loader.load_pages_with_unit_indices(str(sample_pdf))
+        streamed = list(loader.iter_pages_with_unit_indices(str(sample_pdf)))
+        assert len(streamed) == len(
+            expected_pages
+        ), "streaming should yield same number of pages as load"
+        for i, (page, unit_idx) in enumerate(streamed):
+            assert unit_idx == 0, "single source should have unit_idx 0"
+            assert page is not None
+
+        # (2) Multi-source: unit indices match load_pages_with_unit_indices
+        if sample_image and sample_image.exists():
+            sources = [str(sample_image), str(sample_pdf)]
+        else:
+            pdfs = sorted(f for f in source_dir.iterdir() if f.suffix.lower() == ".pdf")
+            if len(pdfs) < 2:
+                pytest.skip(
+                    "need second source (image or another PDF) for multi-source test"
+                )
+            sources = [str(pdfs[0]), str(pdfs[1])]
+
+        expected_pages, expected_indices = loader.load_pages_with_unit_indices(sources)
+        streamed = list(loader.iter_pages_with_unit_indices(sources))
+        assert len(streamed) == len(expected_pages)
+        for i, (page, unit_idx) in enumerate(streamed):
+            assert (
+                unit_idx == expected_indices[i]
+            ), f"page {i}: expected unit_idx {expected_indices[i]}, got {unit_idx}"
+
 
 class TestParseResult:
     """Tests for ParseResult."""
@@ -970,3 +1026,460 @@ class TestGlmOcrConstructor:
             parser = GlmOcr(mode="selfhosted")
             assert parser._use_maas is False
             parser.close()
+
+
+class TestOCRClientOllamaConfig:
+    """Tests for OCRClient initialization with Ollama api_mode."""
+
+    def test_ocr_api_config_default_api_mode(self):
+        """OCRApiConfig defaults to openai mode."""
+        from glmocr.config import OCRApiConfig
+
+        config = OCRApiConfig()
+        assert config.api_mode == "openai"
+
+    def test_ocr_api_config_ollama_mode(self):
+        """OCRApiConfig accepts ollama_generate mode."""
+        from glmocr.config import OCRApiConfig
+
+        config = OCRApiConfig(api_mode="ollama_generate")
+        assert config.api_mode == "ollama_generate"
+
+    def test_ocr_client_reads_api_mode(self):
+        """OCRClient reads api_mode from config."""
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        config = OCRApiConfig(api_mode="ollama_generate", model="glm-ocr:latest")
+        client = OCRClient(config)
+        assert client.api_mode == "ollama_generate"
+        assert client.model == "glm-ocr:latest"
+
+    def test_ocr_client_defaults_to_openai_mode(self):
+        """OCRClient defaults to openai mode."""
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        config = OCRApiConfig()
+        client = OCRClient(config)
+        assert client.api_mode == "openai"
+
+
+class TestConvertToOllamaGenerate:
+    """Tests for OCRClient._convert_to_ollama_generate()."""
+
+    def _make_client(self, model="glm-ocr:latest"):
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        config = OCRApiConfig(api_mode="ollama_generate", model=model)
+        return OCRClient(config)
+
+    def test_basic_text_message(self):
+        """Converts a simple text message."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Recognize this"}],
+                }
+            ],
+            "max_tokens": 100,
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+
+        assert result["model"] == "glm-ocr:latest"
+        assert result["prompt"] == "Recognize this"
+        assert result["stream"] is False
+        assert "images" not in result
+        assert result["options"]["num_predict"] == 100
+
+    def test_text_and_image(self):
+        """Converts a message with text and a base64 image."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "OCR this"},
+                        {
+                            "type": "image_url",
+                            "image_url": "data:image/png;base64,iVBORw0KGgo=",
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 200,
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+
+        assert result["prompt"] == "OCR this"
+        assert result["images"] == ["iVBORw0KGgo="]
+        assert result["options"]["num_predict"] == 200
+
+    def test_image_url_as_dict(self):
+        """Handles image_url given as a dict with 'url' key."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "OCR"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQ"},
+                        },
+                    ],
+                }
+            ],
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        assert result["images"] == ["/9j/4AAQ"]
+
+    def test_non_data_uri_image(self):
+        """Non-data-URI image URLs are kept as-is."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "OCR"},
+                        {
+                            "type": "image_url",
+                            "image_url": "https://example.com/image.png",
+                        },
+                    ],
+                }
+            ],
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        assert result["images"] == ["https://example.com/image.png"]
+
+    def test_string_content(self):
+        """Handles content as a plain string."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [{"role": "user", "content": "Hello world"}],
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        assert result["prompt"] == "Hello world"
+        assert "images" not in result
+
+    def test_empty_messages(self):
+        """Handles empty messages list."""
+        client = self._make_client()
+        result = client._convert_to_ollama_generate({"messages": []})
+        assert result["prompt"] == ""
+        assert "images" not in result
+
+    def test_no_messages_key(self):
+        """Handles missing messages key."""
+        client = self._make_client()
+        result = client._convert_to_ollama_generate({})
+        assert result["prompt"] == ""
+
+    def test_non_user_messages_ignored(self):
+        """System and assistant messages are ignored (last user message used)."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [
+                {"role": "system", "content": "You are an OCR model."},
+                {"role": "user", "content": "First question"},
+                {"role": "assistant", "content": "First answer"},
+                {"role": "user", "content": "Second question"},
+            ],
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        assert result["prompt"] == "Second question"
+
+    def test_parameter_mapping(self):
+        """Maps OpenAI parameters to Ollama options."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [{"role": "user", "content": "test"}],
+            "max_tokens": 500,
+            "temperature": 0.5,
+            "top_p": 0.9,
+            "top_k": 40,
+            "repetition_penalty": 1.2,
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        opts = result["options"]
+        assert opts["num_predict"] == 500
+        assert opts["temperature"] == 0.5
+        assert opts["top_p"] == 0.9
+        assert opts["top_k"] == 40
+        assert opts["repeat_penalty"] == 1.2
+
+    def test_no_options_when_no_params(self):
+        """No options field when no parameters are mapped."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [{"role": "user", "content": "test"}],
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        assert "options" not in result
+
+    def test_model_fallback(self):
+        """Falls back to 'glm-ocr:latest' when model is not set."""
+        client = self._make_client(model=None)
+        result = client._convert_to_ollama_generate(
+            {"messages": [{"role": "user", "content": "x"}]}
+        )
+        assert result["model"] == "glm-ocr:latest"
+
+    def test_multiple_images(self):
+        """Handles multiple images in a single message."""
+        client = self._make_client()
+        openai_data = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Compare these"},
+                        {
+                            "type": "image_url",
+                            "image_url": "data:image/png;base64,AAAA",
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": "data:image/png;base64,BBBB",
+                        },
+                    ],
+                }
+            ],
+        }
+        result = client._convert_to_ollama_generate(openai_data)
+        assert result["images"] == ["AAAA", "BBBB"]
+
+
+class TestOCRClientProcessOllama:
+    """Tests for OCRClient.process() with ollama_generate mode."""
+
+    def _make_client(self, model="glm-ocr:latest"):
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        config = OCRApiConfig(
+            api_mode="ollama_generate",
+            model=model,
+            retry_max_attempts=0,
+        )
+        client = OCRClient(config)
+        client._session = MagicMock()
+        return client
+
+    def _mock_response(self, status_code=200, json_data=None, text="", headers=None):
+        resp = MagicMock()
+        resp.status_code = status_code
+        resp.json.return_value = json_data or {}
+        resp.text = text
+        resp.headers = headers or {}
+        return resp
+
+    def test_process_ollama_success(self):
+        """Successful Ollama generate response is parsed correctly."""
+        client = self._make_client()
+        resp = self._mock_response(
+            json_data={"response": "# Hello World", "done": True}
+        )
+        client._session.post.return_value = resp
+
+        result, status = client.process(
+            {"messages": [{"role": "user", "content": "OCR this"}], "max_tokens": 100}
+        )
+
+        assert status == 200
+        assert result["choices"][0]["message"]["content"] == "# Hello World"
+
+    def test_process_ollama_strips_whitespace(self):
+        """Ollama response is stripped of whitespace."""
+        client = self._make_client()
+        resp = self._mock_response(json_data={"response": "  Hello  \n", "done": True})
+        client._session.post.return_value = resp
+
+        result, status = client.process(
+            {"messages": [{"role": "user", "content": "test"}]}
+        )
+        assert result["choices"][0]["message"]["content"] == "Hello"
+
+    def test_process_ollama_error_field(self):
+        """Ollama response with error field returns 500."""
+        client = self._make_client()
+        resp = self._mock_response(json_data={"error": "model not found"})
+        client._session.post.return_value = resp
+
+        result, status = client.process(
+            {"messages": [{"role": "user", "content": "test"}]}
+        )
+        assert status == 500
+        assert "model not found" in result["error"]
+
+    def test_process_ollama_missing_response_field(self):
+        """Ollama response without 'response' field returns 500."""
+        client = self._make_client()
+        resp = self._mock_response(json_data={"done": True})  # no "response" key
+        client._session.post.return_value = resp
+
+        result, status = client.process(
+            {"messages": [{"role": "user", "content": "test"}]}
+        )
+        assert status == 500
+        assert "missing 'response' field" in result["error"]
+
+    def test_process_ollama_converts_request_format(self):
+        """Ollama mode converts OpenAI request to generate format."""
+        client = self._make_client()
+        resp = self._mock_response(json_data={"response": "ok", "done": True})
+        client._session.post.return_value = resp
+
+        client.process(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "OCR this"},
+                            {
+                                "type": "image_url",
+                                "image_url": "data:image/png;base64,abc123",
+                            },
+                        ],
+                    }
+                ],
+                "max_tokens": 50,
+            }
+        )
+
+        # Inspect the actual JSON sent
+        call_kwargs = client._session.post.call_args
+        sent_data = json.loads(call_kwargs.kwargs.get("data") or call_kwargs[1]["data"])
+        assert sent_data["model"] == "glm-ocr:latest"
+        assert sent_data["prompt"] == "OCR this"
+        assert sent_data["images"] == ["abc123"]
+        assert sent_data["stream"] is False
+        assert sent_data["options"]["num_predict"] == 50
+
+    def test_process_openai_mode_unchanged(self):
+        """OpenAI mode does not convert request format."""
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        config = OCRApiConfig(api_mode="openai", model="my-model", retry_max_attempts=0)
+        client = OCRClient(config)
+        client._session = MagicMock()
+
+        resp = self._mock_response(
+            json_data={"choices": [{"message": {"content": "result"}}]}
+        )
+        client._session.post.return_value = resp
+
+        result, status = client.process(
+            {
+                "messages": [{"role": "user", "content": "test"}],
+                "max_tokens": 10,
+            }
+        )
+        assert status == 200
+        assert result["choices"][0]["message"]["content"] == "result"
+
+        # Verify the request kept OpenAI format (has "messages")
+        call_kwargs = client._session.post.call_args
+        sent_data = json.loads(call_kwargs.kwargs.get("data") or call_kwargs[1]["data"])
+        assert "messages" in sent_data
+        assert sent_data["model"] == "my-model"
+
+    def test_process_openai_invalid_response_format(self):
+        """OpenAI mode returns 500 on malformed response."""
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        config = OCRApiConfig(api_mode="openai", retry_max_attempts=0)
+        client = OCRClient(config)
+        client._session = MagicMock()
+
+        resp = self._mock_response(json_data={"unexpected": "format"})
+        client._session.post.return_value = resp
+
+        result, status = client.process(
+            {"messages": [{"role": "user", "content": "test"}]}
+        )
+        assert status == 500
+        assert "Invalid OpenAI API response format" in result["error"]
+
+
+class TestOCRClientConnectOllama:
+    """Tests for OCRClient.connect() with ollama_generate mode."""
+
+    @patch("glmocr.ocr_client.requests.post")
+    @patch("glmocr.ocr_client.socket.socket")
+    def test_connect_ollama_builds_correct_payload(self, mock_socket_cls, mock_post):
+        """connect() sends Ollama-style test payload when api_mode is ollama_generate."""
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        # Socket connects successfully
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+        mock_sock.__exit__ = MagicMock(return_value=False)
+        mock_socket_cls.return_value = mock_sock
+
+        # API responds 200
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_post.return_value = mock_response
+
+        config = OCRApiConfig(
+            api_mode="ollama_generate",
+            model="glm-ocr:latest",
+            api_host="localhost",
+            api_port=11434,
+            api_path="/api/generate",
+        )
+        client = OCRClient(config)
+        client.connect()
+
+        # Inspect the payload sent
+        call_kwargs = mock_post.call_args
+        sent_data = json.loads(call_kwargs.kwargs.get("data") or call_kwargs[1]["data"])
+        assert sent_data["model"] == "glm-ocr:latest"
+        assert sent_data["prompt"] == "hello"
+        assert sent_data["stream"] is False
+        assert sent_data["options"]["num_predict"] == 10
+
+    @patch("glmocr.ocr_client.requests.post")
+    @patch("glmocr.ocr_client.socket.socket")
+    def test_connect_openai_builds_correct_payload(self, mock_socket_cls, mock_post):
+        """connect() sends OpenAI-style test payload when api_mode is openai."""
+        from glmocr.config import OCRApiConfig
+        from glmocr.ocr_client import OCRClient
+
+        mock_sock = MagicMock()
+        mock_sock.connect_ex.return_value = 0
+        mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+        mock_sock.__exit__ = MagicMock(return_value=False)
+        mock_socket_cls.return_value = mock_sock
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_post.return_value = mock_response
+
+        config = OCRApiConfig(
+            api_mode="openai",
+            model="my-model",
+            api_host="localhost",
+            api_port=8080,
+        )
+        client = OCRClient(config)
+        client.connect()
+
+        call_kwargs = mock_post.call_args
+        sent_data = json.loads(call_kwargs.kwargs.get("data") or call_kwargs[1]["data"])
+        assert "messages" in sent_data
+        assert sent_data["model"] == "my-model"
+        assert sent_data["max_tokens"] == 10
