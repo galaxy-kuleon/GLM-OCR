@@ -177,3 +177,4 @@ data/
 *.pid
 .DS_Store
 examples-pdf/
+input/
