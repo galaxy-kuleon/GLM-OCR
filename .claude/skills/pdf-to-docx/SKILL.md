@@ -177,7 +177,7 @@ uv run --with requests,Pillow \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
 ```
 
-**What this does**: For each page, sends the page image + region summary to Poe AI (`gemini-3-flash`) and receives simplified style data (font size, bold, color, alignment). Results are saved as `$WORKSPACE/ocr-output/input/style-page-{N}.json`.
+**What this does**: For each page, sends the page image + region summary to Poe AI (`kimi-k2.5`) and receives simplified style data (font size, bold, color, alignment). Results are saved as `$WORKSPACE/ocr-output/input/style-page-{N}.json`.
 
 **Table cell-level style extraction**: For each table region, the script performs a second VLM call to detect non-default text colors and background colors at the column/row/cell level. This captures per-cell styling that would otherwise be lost when OCR treats the entire table as one region. Results are stored in the `cell_overrides` field of the style entry.
 

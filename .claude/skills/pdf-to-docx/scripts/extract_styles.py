@@ -4,7 +4,7 @@
 Usage:
     python extract_styles.py --workspace PATH --pages N [--poe-api-key KEY]
 
-For each page, calls Poe AI (gemini-3-flash) with a simplified prompt to
+For each page, calls Poe AI (kimi-k2.5) with a simplified prompt to
 extract font size, bold, color, and alignment per OCR region.
 
 Output: $WORKSPACE/ocr-output/input/style-page-{N}.json (1-based, per page)
@@ -33,7 +33,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 POE_API_URL = "https://api.poe.com/v1/chat/completions"
-POE_MODEL = "gemini-3-flash"
+POE_MODEL = "kimi-k2.5"
 
 SYSTEM_PROMPT = """You analyze document page images and describe text styling.
 For each numbered text region, report: font size (pt), bold (true/false),

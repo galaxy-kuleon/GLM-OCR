@@ -1,17 +1,17 @@
 # Translation Prompt Template
 
-Prompt template used by `translate_content.py` to send translation requests to LM Studio (`qwen/qwen3-4b-2507`).
+Prompt template used for AI translation of document content.
 
 ## Usage
 
-In the generated `translate_content.py` script, read this template and replace the template variables:
+When translating text extracted from XML DSL, use this template with the following variables:
 - `{target_language}` — target language and style (from `--lang` argument)
 - `{style_notes}` — extra style/tone notes (from `--style` argument, may be empty)
 - `{full_document_markdown}` — full content of `input.md` (provides terminology/context reference)
 - `{page_num}` — current page number (1-based)
 - `{texts_json}` — current page's translatable text elements extracted from XML DSL (see format below)
 
-## Input Format (texts JSON sent to model)
+## Input Format (texts JSON)
 
 Text is extracted at the element level from `<run>` and `<cell>` elements in the XML DSL. Each item includes an `xpath` for identification and the `text` content to translate.
 
@@ -46,9 +46,9 @@ Text is extracted at the element level from `<run>` and `<cell>` elements in the
 - `<run is-math="true">` elements are **excluded** — math/formula content is never translated
 - Empty text elements are excluded from the input.
 
-## Output Format (model returns)
+## Output Format (AI returns)
 
-The output is a JSON **object** with a `translations` array (required by structured output — top-level must be object):
+The output is a JSON **object** with a `translations` array:
 
 ```json
 {
@@ -69,7 +69,7 @@ The output is a JSON **object** with a `translations` array (required by structu
 }
 ```
 
-The `translate_content.py` script extracts the `translations` array from this wrapper object via `response["translations"]`, then maps each `xpath` back to the corresponding XML element to replace its text.
+The translation logic extracts the `translations` array from this wrapper object via `response["translations"]`, then maps each `xpath` back to the corresponding XML element to replace its text.
 
 ## System Prompt Template
 
@@ -110,10 +110,10 @@ Output a JSON object with a "translations" array. Each item has "xpath" (string,
 |----------|-----------|
 | xpath-based element-level extraction | Operates directly on XML DSL `<run>` and `<cell>` elements, enabling precise text replacement without affecting structure or attributes |
 | JSON-in / JSON-out | Ensures structured I/O, easy to validate and merge back into XML |
-| Full document as system context | 256k context is sufficient; helps with terminology consistency |
-| One page per API call | Balances context length and translation consistency |
-| Structured output (`response_format`) | LM Studio enforces valid JSON via grammar-based sampling, eliminating code fence cleanup and JSON parse retries |
-| `{"translations": [...]}` wrapper | OpenAI structured output spec requires top-level object; script extracts array via `["translations"]` |
+| Full document as system context | Helps with terminology consistency across the entire document |
+| One page per translation batch | Balances context length and translation consistency |
+| `{"translations": [...]}` wrapper | Standardizes output format; script extracts array via `["translations"]` |
 | XML attributes preserved as-is | font-size, color, bold, italic, alignment etc. are language-independent and never modified |
 | Cell/run branching | `<cell>` with `<run>` children uses per-run xpaths; without uses cell-level xpath — matches keyword-styling DSL output |
 | Math exclusion | `<run is-math="true">` excluded at extraction time; rule 7 as safety net if any slip through |
+| Direct AI translation | No external API calls needed; Claude translates directly using the provided context |

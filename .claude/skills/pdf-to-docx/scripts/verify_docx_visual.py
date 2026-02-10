@@ -31,7 +31,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 POE_API_URL = "https://api.poe.com/v1/chat/completions"
-POE_MODEL = "gemini-3-flash"
+POE_MODEL = "kimi-k2.5"
 
 SYSTEM_PROMPT_MATCHED = """You compare two document page images: the Original PDF (first image) and a DOCX rendering (second image), along with the XML DSL that produced the DOCX.
 Find visual differences and provide QUANTITATIVE, ACTIONABLE fixes referencing specific XML DSL attributes.

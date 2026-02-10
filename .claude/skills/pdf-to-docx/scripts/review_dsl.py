@@ -33,7 +33,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 POE_API_URL = "https://api.poe.com/v1/chat/completions"
-POE_MODEL = "gemini-3-flash"
+POE_MODEL = "kimi-k2.5"
 
 # Single-page review prompt (fallback)
 SYSTEM_PROMPT = """You compare a PDF page image against an XML description of that page.

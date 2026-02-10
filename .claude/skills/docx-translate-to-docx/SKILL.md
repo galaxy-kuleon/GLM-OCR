@@ -1,6 +1,6 @@
 ---
 name: docx-translate-to-docx
-description: Translates a DOCX workspace (produced by pdf-to-docx) into a target language using LM Studio or Poe AI, preserving all layout, formatting, and styling. Operates on XML DSL files for reliable translation.
+description: Translates a DOCX workspace (produced by pdf-to-docx) into a target language using AI translation, preserving all layout, formatting, and styling. Operates on XML DSL files for reliable translation.
 argument-hint: <workspace-path> --lang <target-language-and-style> [--style <extra-style-notes>]
 disable-model-invocation: false
 allowed-tools:
@@ -18,8 +18,7 @@ Translate a pdf-to-docx workspace into a target language by operating on XML DSL
 
 ### Division of Responsibilities
 
-- **Translation model** (LM Studio `qwen/qwen3-4b-2507` or Poe AI): Only responsible for translating text content (receives source JSON → returns translated JSON)
-- **Claude agent**: Responsible for generating `translate_content.py`, flow control, and verification
+- **Claude agent (AI)**: Responsible for extracting text from XML DSL, translating content, and writing translated XML DSL files
 - **Fixed script** `dsl_to_docx.py`: Converts translated XML DSL → DOCX (no dynamic code generation)
 
 ---
@@ -46,7 +45,6 @@ Run these checks and **abort with a clear message** if any fail:
 
 ```bash
 command -v uv || echo "MISSING: uv"
-curl -sf http://localhost:1234/v1/models > /dev/null || echo "MISSING: LM Studio not running on localhost:1234"
 ```
 
 ### Validate workspace
@@ -63,6 +61,7 @@ Verify the workspace exists and contains required files:
 
 ```bash
 mkdir -p "$WORKSPACE/dsl-translated"
+mkdir -p "$WORKSPACE/translation"
 ```
 
 ---
@@ -90,97 +89,79 @@ Understand the XML DSL structure:
 
 ---
 
-## Step 2: Generate & Execute Translation Script
+## Step 2: Extract and Translate Text
 
-**Claude agent generates** `$WORKSPACE/translation/translate_content.py`. This Python script extracts text from XML DSL, sends to translation model, and writes translated XML DSL files.
+**Claude agent performs translation directly** — no external API calls needed.
 
-### Script logic
+### 2.1 Extract translatable text from each page
 
-The generated script must:
+For each `page-{N}.xml`, extract translatable text elements:
 
-1. **Read each `page-{N}.xml`** and extract translatable text:
-   - From `<run>` elements: `.text` content
-   - **Skip** `<run>` elements with `is-math="true"` attribute (math formulas must not be translated)
-   - From `<cell>` elements — use branching logic:
-     - If `<cell>` has `<run>` children → extract each `<run>`'s text (xpath: `table[0]/row[0]/cell[0]/run[0]`)
-     - If `<cell>` has no `<run>` children → extract `cell.text` (xpath: `table[0]/row[0]/cell[0]`)
-   - Traverse `<side-by-side>` → `<column>` → `<paragraph>` → `<run>` (xpath: `side-by-side[0]/column[0]/paragraph[0]/run[0]`)
-   - Skip non-text attributes (font-size, color, bold, etc.)
+- From `<run>` elements: `.text` content
+- **Skip** `<run>` elements with `is-math="true"` attribute (math formulas must not be translated)
+- From `<cell>` elements — use branching logic:
+  - If `<cell>` has `<run>` children → extract each `<run>`'s text (xpath: `table[0]/row[0]/cell[0]/run[0]`)
+  - If `<cell>` has no `<run>` children → extract `cell.text` (xpath: `table[0]/row[0]/cell[0]`)
+- Traverse `<side-by-side>` → `<column>` → `<paragraph>` → `<run>` (xpath: `side-by-side[0]/column[0]/paragraph[0]/run[0]`)
+- Skip non-text attributes (font-size, color, bold, etc.)
 
-2. **Build translation payload per page**: Package extracted text into JSON, combine with translation prompt, and send to LM Studio:
-   - Endpoint: `http://localhost:1234/v1/chat/completions`
-   - Model: `qwen/qwen3-4b-2507`
-   - **One API call per page**
-   - System prompt includes: target language & style instructions, full document markdown as reference
-   - User prompt includes: current page's text content as JSON array
+Input format per page:
 
-   Input format per page:
-
-   ```json
-   [
-     { "xpath": "heading[1]/run[1]", "text": "文件標題" },
-     { "xpath": "paragraph[1]/run[1]", "text": "一般文字" },
-     { "xpath": "table[1]/row[0]/cell[0]", "text": "表頭1" },
-     { "xpath": "table[1]/row[1]/cell[2]/run[0]", "text": "關鍵字" },
-     {
-       "xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]",
-       "text": "左欄文字"
-     }
-   ]
-   ```
-
-   Note: `<run is-math="true">` elements are excluded — math/formula content is never sent for translation.
-
-   Expected output:
-
-   ```json
-   {
-     "translations": [
-       { "xpath": "heading[1]/run[1]", "translated_text": "Document Title" },
-       { "xpath": "paragraph[1]/run[1]", "translated_text": "Normal text" },
-       { "xpath": "table[1]/row[0]/cell[0]", "translated_text": "Header 1" },
-       {
-         "xpath": "table[1]/row[1]/cell[2]/run[0]",
-         "translated_text": "Keyword"
-       },
-       {
-         "xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]",
-         "translated_text": "Left column text"
-       }
-     ]
-   }
-   ```
-
-3. **Write translated XML**: For each page:
-   - Deep copy the original `page-{N}.xml`
-   - Replace text in matched `<run>` and `<cell>` elements using xpath lookup
-   - For `<cell>` with `<run>` children: replace each `run.text`, NOT `cell.text`
-   - For `<cell>` without `<run>` children: replace `cell.text` directly
-   - Do NOT modify `<run is-math="true">` elements (math formulas are untouched)
-   - Preserve ALL attributes (font-size, color, bold, alignment, etc.)
-   - Save to `$WORKSPACE/dsl-translated/page-{N}.xml`
-
-4. **Error handling**:
-   - Timeout: 300 seconds per API call
-   - Retry: up to 2 retries per page on failure
-   - Use `response_format` with `json_schema` for structured output if model supports it
-   - If structured output fails, fall back to manual JSON parsing
-
-### Prompt template
-
-Read the prompt template from `translation-prompt.md` (located in the same skill directory as this file) and fill in the template variables:
-
-- `{target_language}` → `TARGET_LANG`
-- `{style_notes}` → `STYLE_NOTES` or empty
-- `{full_document_markdown}` → content of `input.md`
-
-### Execute
-
-```bash
-uv run --with requests,lxml "$WORKSPACE/translation/translate_content.py"
+```json
+[
+  { "xpath": "heading[1]/run[1]", "text": "文件標題" },
+  { "xpath": "paragraph[1]/run[1]", "text": "一般文字" },
+  { "xpath": "table[1]/row[0]/cell[0]", "text": "表頭1" },
+  { "xpath": "table[1]/row[1]/cell[2]/run[0]", "text": "關鍵字" },
+  {
+    "xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]",
+    "text": "左欄文字"
+  }
+]
 ```
 
-If it fails, read the error, fix the script, and retry (up to 3 times).
+Note: `<run is-math="true">` elements are excluded — math/formula content is never sent for translation.
+
+### 2.2 Translate using AI (Claude)
+
+For each page, translate the extracted text elements using the translation prompt template.
+
+**Translation approach:**
+- Process one page at a time to maintain context
+- Use the full document markdown as context for terminology consistency
+- Apply the target language and style notes
+- Return translations in the same format
+
+Expected output format:
+
+```json
+{
+  "translations": [
+    { "xpath": "heading[1]/run[1]", "translated_text": "Document Title" },
+    { "xpath": "paragraph[1]/run[1]", "translated_text": "Normal text" },
+    { "xpath": "table[1]/row[0]/cell[0]", "translated_text": "Header 1" },
+    {
+      "xpath": "table[1]/row[1]/cell[2]/run[0]",
+      "translated_text": "Keyword"
+    },
+    {
+      "xpath": "side-by-side[0]/column[0]/paragraph[0]/run[0]",
+      "translated_text": "Left column text"
+    }
+  ]
+}
+```
+
+### 2.3 Write translated XML
+
+For each page:
+- Deep copy the original `page-{N}.xml`
+- Replace text in matched `<run>` and `<cell>` elements using xpath lookup
+- For `<cell>` with `<run>` children: replace each `run.text`, NOT `cell.text`
+- For `<cell>` without `<run>` children: replace `cell.text` directly
+- Do NOT modify `<run is-math="true">` elements (math formulas are untouched)
+- Preserve ALL attributes (font-size, color, bold, alignment, etc.)
+- Save to `$WORKSPACE/dsl-translated/page-{N}.xml`
 
 ---
 
@@ -214,11 +195,8 @@ uv run --with python-docx,lxml,Pillow \
 
 ## Error Handling
 
-- **LM Studio not running**: Abort with message to start LM Studio with `qwen/qwen3-4b-2507` model
-- **LM Studio API error / timeout**: Retry up to 2 times per page with 10s delay
-- **JSON parse error from LM**: Strip markdown code fences, try `json.loads` again; if still fails, retry
 - **XML DSL files missing**: Abort — user needs to run pdf-to-docx first with the new XML DSL pipeline
-- **translate_content.py execution fails**: Read traceback, fix script, retry up to 3 times
+- **Translation errors**: If translation fails for any page, report the error and continue with remaining pages
 - **dsl_to_docx.py execution fails**: Check translated XML is well-formed. Fix and retry.
 - **Output DOCX is 0 bytes**: Likely malformed translated XML — check traceback
 
@@ -243,7 +221,6 @@ $WORKSPACE/
 ├── dsl-translated/               ← translated XML DSL
 │   ├── page-1.xml, page-2.xml, ...
 ├── translation/
-│   ├── translate_content.py      ← generated by agent
 │   └── translated-output.docx   ← final translated DOCX
 └── ...
 ```
@@ -256,3 +233,4 @@ $WORKSPACE/
 | Remove hardcoded text checks                  | No hardcoded checks in fixed scripts          |
 | Generate new assembly script                  | Use fixed `dsl_to_docx.py` with `--dsl-dir`   |
 | Fragile: depends on assembly script structure | Robust: XML text replacement is deterministic |
+| Requires LM Studio running                    | Direct AI translation (no external service)   |
