@@ -1,7 +1,7 @@
 # AGENTS.md
 
-This project provides two AI Agent Skills that form a document processing pipeline:
-**PDF → editable DOCX → translated DOCX**.
+This project provides AI Agent Skills for document processing:
+**PDF → editable DOCX → translated DOCX**, plus a standalone **DOCX → translated DOCX** pipeline.
 
 ---
 
@@ -72,7 +72,48 @@ Translates an existing pdf-to-docx workspace into a target language, preserving 
 
 ---
 
-## Typical End-User Workflow
+## Skill 3: `/another-pure-pure-docx-translate-to-docx`
+
+Translates a DOCX (or DOC) file directly into a target language by parsing and modifying OOXML. **No dependency on PDF, OCR, or the pdf-to-docx pipeline** — works on any standard DOCX file.
+
+```
+/another-pure-pure-docx-translate-to-docx <input-file.docx> --lang <target-language> [--style <style-notes>] [--output <output-path>]
+```
+
+**Examples:**
+```
+/another-pure-pure-docx-translate-to-docx report.docx --lang 繁體中文
+/another-pure-pure-docx-translate-to-docx contract.doc --lang "formal English" --style "keep legal terms in Latin"
+/another-pure-pure-docx-translate-to-docx input/manual.docx --lang 日本語 --output output/manual-ja.docx
+```
+
+### Prerequisites
+
+- `uv` (Python package runner)
+- `soffice` (LibreOffice, only needed if input is `.doc` not `.docx`)
+
+### Pipeline
+
+1. **Convert DOC → DOCX** (if needed) — `soffice --headless --convert-to docx`
+2. **Extract translatable text** — fixed `extract_docx_texts.py` parses DOCX ZIP/XML, outputs `texts.json`
+3. **Translate via AI** — Claude agent translates segments in batches of ~50
+4. **Apply translations** — fixed `apply_docx_translations.py` writes translated text back into DOCX
+5. **Verify output** — confirms translated DOCX exists and is non-empty
+
+### Key Details
+
+- Operates directly on DOCX ZIP/XML using `lxml` — no `python-docx` dependency
+- Handles: paragraphs, headings, tables, textboxes (`wps:txbx` + `v:textbox`), image alt text, chart text, headers, footers, footnotes, endnotes
+- Only `w:t` text nodes are modified — all formatting (font, size, bold, color, alignment) is preserved (zero-loss round-trip)
+- Translation unit is the paragraph (`w:p`); translated text goes into the first run, subsequent runs are cleared
+- Scripts are in `.claude/skills/another-pure-pure-docx-translate-to-docx/scripts/`
+- Output: `<input-name>.appdttd.docx` (next to the input file by default)
+
+---
+
+## Typical End-User Workflows
+
+### PDF → DOCX → Translate (Skills 1 + 2)
 
 ```
 # Step 1: Convert PDF to editable DOCX
@@ -80,4 +121,14 @@ Translates an existing pdf-to-docx workspace into a target language, preserving 
 
 # Step 2: Translate the resulting workspace
 /docx-translate-to-docx ./output/contract-docx-workspace --lang English
+```
+
+### Standalone DOCX Translate (Skill 3)
+
+```
+# Translate a DOCX file directly — no PDF or OCR needed
+/another-pure-pure-docx-translate-to-docx ./report.docx --lang 繁體中文
+
+# Translate a .doc file (auto-converts via LibreOffice)
+/another-pure-pure-docx-translate-to-docx ./legacy.doc --lang "formal English"
 ```
