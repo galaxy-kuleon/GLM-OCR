@@ -111,6 +111,54 @@ Translates a DOCX (or DOC) file directly into a target language by parsing and m
 
 ---
 
+## Skill 4: `/image-to-docx`
+
+Converts one or more scanned/photographed images (representing document pages) into a high-fidelity editable DOCX. Performs per-page OCR with glm-ocr, then reuses the full `pdf-to-docx` pipeline for style extraction, DSL generation, VLM review, and DOCX assembly.
+
+```
+/image-to-docx <images> [--output <dir>]
+```
+
+**`<images>`** accepts:
+- Single file: `/image-to-docx scan.jpg`
+- Directory (auto-finds jpg/jpeg/png/bmp/gif/webp): `/image-to-docx scans/`
+- Space-separated files: `/image-to-docx p1.jpg p2.jpg p3.jpg`
+
+**Examples:**
+```
+/image-to-docx image_input/20260302_010005.jpg
+/image-to-docx image_input/ --output ./output
+/image-to-docx page1.jpg page2.jpg page3.jpg --output ./output
+```
+
+### Prerequisites
+
+- `uv` (Python package runner) — required
+- `POE_API_KEY` env var — optional; enables VLM style extraction and review (improves quality)
+- `soffice` (LibreOffice) — optional; enables visual verification step
+
+### Pipeline
+
+1. **Prepare images** — natural-sort images, convert to PNG for VLM reference, measure dimensions in pts, write `image-info.json`
+2. **Per-page OCR** — `uv run glmocr parse` on each page, producing structured JSON + markdown + cropped images
+3. **Consolidate OCR** — merge per-page results into pdf-to-docx compatible `ocr-output/input/` structure, rename crop images with correct page indices
+4. **Style extraction** — VLM (Poe AI) infers font sizes, colors, alignment per region *(reuses pdf-to-docx)*
+5. **XML DSL generation** — converts OCR + styles into per-page XML files with page dimensions from `image-info.json` *(reuses pdf-to-docx)*
+6. **VLM review** — compares XML DSL against original images; agent fixes issues *(reuses pdf-to-docx)*
+7. **DSL → DOCX** — deterministic assembly *(reuses pdf-to-docx)*
+8. **Visual verification** (optional) — renders DOCX back to images for VLM comparison *(reuses pdf-to-docx)*
+
+### Key Details
+
+- Workspace: `<output>/<first-image-stem>-img-docx-workspace/`
+- New scripts in `.claude/skills/image-to-docx/scripts/` handle image→workspace conversion
+- All pdf-to-docx scripts (extract_styles, build_page_dsl, review_dsl, dsl_to_docx, verify_docx_visual) are reused unchanged
+- OCR `bbox_2d` values are normalized 0–1000, not pixels
+- Page dimensions (pts) are derived from image DPI; fallback is 200 DPI when EXIF is missing
+- Output: `<workspace>/final-output.docx`
+
+---
+
 ## Typical End-User Workflows
 
 ### PDF → DOCX → Translate (Skills 1 + 2)
@@ -131,4 +179,17 @@ Translates a DOCX (or DOC) file directly into a target language by parsing and m
 
 # Translate a .doc file (auto-converts via LibreOffice)
 /another-pure-pure-docx-translate-to-docx ./legacy.doc --lang "formal English"
+```
+
+### Image(s) → DOCX (Skill 4)
+
+```
+# Convert a single scanned image to editable DOCX
+/image-to-docx ./scan.jpg
+
+# Convert a directory of scanned pages to DOCX
+/image-to-docx ./scans/ --output ./output
+
+# Convert multiple images (processed in natural sort order)
+/image-to-docx page1.jpg page2.jpg page3.jpg --output ./output
 ```

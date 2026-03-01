@@ -17,7 +17,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Skill(pdf-to-docx)",
       "Skill(docx-translate-to-docx)",
-      "Skill(another-pure-pure-docx-translate-to-docx)"
+      "Skill(another-pure-pure-docx-translate-to-docx)",
+      "Skill(image-to-docx)"
     ]
   },
   "outputStyle": "default"
