@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""review_dsl.py - Review XML DSL against PDF page images using Poe AI.
+"""review_dsl.py - Review XML DSL against PDF page images using OpenCode Zen API.
 
 Usage:
-    python review_dsl.py --workspace PATH --pages N [--poe-api-key KEY]
+    python review_dsl.py --workspace PATH --pages N [--zen-api-key KEY]
 
 For documents with <=5 pages, sends ALL page images + ALL XML DSLs in a single
 API call for cross-page consistency checking. For >5 pages or if multi-page mode
@@ -11,7 +11,7 @@ fails, falls back to per-page review.
 Output: $WORKSPACE/dsl/review-page-{N}.json (per page)
 
 If no issues found, the review file contains [].
-API key is read from --poe-api-key argument or POE_API_KEY environment variable
+API key is read from --zen-api-key argument or OPENCODE_ZEN_API_KEY environment variable
 or .env file.
 """
 
@@ -32,8 +32,8 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 
-POE_API_URL = "https://api.poe.com/v1/chat/completions"
-POE_MODEL = "kimi-k2.5"
+API_URL = "https://opencode.ai/zen/v1/chat/completions"
+API_MODEL = "kimi-k2.5"
 
 # Single-page review prompt (fallback)
 SYSTEM_PROMPT = """You compare a PDF page image against an XML description of that page.
@@ -152,22 +152,22 @@ Only output JSON object, nothing else."""
 
 
 def load_api_key(args_key, workspace):
-    """Load Poe API key from args, env, or .env file."""
+    """Load API key from args, env, or .env file."""
     if args_key:
         return args_key
-    if os.environ.get("POE_API_KEY"):
-        return os.environ["POE_API_KEY"]
+    if os.environ.get("OPENCODE_ZEN_API_KEY"):
+        return os.environ["OPENCODE_ZEN_API_KEY"]
     env_file = Path(workspace) / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
-            if line.startswith("POE_API_KEY="):
+            if line.startswith("OPENCODE_ZEN_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     cwd_env = Path(".env")
     if cwd_env.exists():
         for line in cwd_env.read_text().splitlines():
             line = line.strip()
-            if line.startswith("POE_API_KEY="):
+            if line.startswith("OPENCODE_ZEN_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     return None
 
@@ -177,15 +177,15 @@ def encode_image(path):
         return base64.b64encode(f.read()).decode("utf-8")
 
 
-def call_poe_review(api_key, page_image_b64, xml_content):
-    """Call Poe AI API for single-page DSL review and return parsed JSON array."""
+def call_api_review(api_key, page_image_b64, xml_content):
+    """Call OpenCode Zen API for single-page DSL review and return parsed JSON array."""
     if requests is None:
         raise RuntimeError("requests library not available")
 
     user_prompt = USER_PROMPT_TEMPLATE.format(xml_content=xml_content)
 
     payload = {
-        "model": POE_MODEL,
+        "model": API_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -208,7 +208,7 @@ def call_poe_review(api_key, page_image_b64, xml_content):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
+    resp = requests.post(API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()
@@ -227,11 +227,11 @@ def call_poe_review(api_key, page_image_b64, xml_content):
     raise ValueError(f"Unexpected response format: {type(result)}")
 
 
-def call_poe_review_multi(api_key, page_images_b64, xml_contents, page_numbers):
-    """Call Poe AI API for multi-page DSL review.
+def call_api_review_multi(api_key, page_images_b64, xml_contents, page_numbers):
+    """Call OpenCode Zen API for multi-page DSL review.
 
     Args:
-        api_key: Poe API key
+        api_key: OpenCode Zen API key
         page_images_b64: list of base64-encoded page images
         xml_contents: list of XML DSL strings
         page_numbers: list of page numbers (1-based)
@@ -264,7 +264,7 @@ def call_poe_review_multi(api_key, page_images_b64, xml_contents, page_numbers):
     content_parts.append({"type": "text", "text": user_prompt})
 
     payload = {
-        "model": POE_MODEL,
+        "model": API_MODEL,
         "messages": [
             {"role": "system", "content": MULTI_PAGE_SYSTEM_PROMPT},
             {
@@ -281,7 +281,7 @@ def call_poe_review_multi(api_key, page_images_b64, xml_contents, page_numbers):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
+    resp = requests.post(API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()
@@ -321,12 +321,12 @@ def call_poe_review_multi(api_key, page_images_b64, xml_contents, page_numbers):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Review XML DSL against page images using Poe AI"
+        description="Review XML DSL against page images using OpenCode Zen API"
     )
     parser.add_argument("--workspace", required=True, help="Workspace directory path")
     parser.add_argument("--pages", required=True, type=int, help="Total page count")
     parser.add_argument(
-        "--poe-api-key", default=None, help="Poe API key (or set POE_API_KEY env)"
+        "--zen-api-key", default=None, help="OpenCode Zen API key (or set OPENCODE_ZEN_API_KEY env)"
     )
     args = parser.parse_args()
 
@@ -334,9 +334,9 @@ def main():
     total_pages = args.pages
 
     # Load API key
-    api_key = load_api_key(args.poe_api_key, workspace)
+    api_key = load_api_key(args.zen_api_key, workspace)
     if not api_key:
-        print("Warning: POE_API_KEY not found. Skipping VLM review.", file=sys.stderr)
+        print("Warning: OPENCODE_ZEN_API_KEY not found. Skipping VLM review.", file=sys.stderr)
         # Write empty reviews
         dsl_dir = workspace / "dsl"
         for page_num in range(1, total_pages + 1):
@@ -386,7 +386,7 @@ def main():
                 page_numbers.append(page_num)
 
             # Call multi-page review API
-            results = call_poe_review_multi(
+            results = call_api_review_multi(
                 api_key, page_images_b64, xml_contents, page_numbers
             )
 
@@ -441,7 +441,7 @@ def main():
 
         try:
             page_image_b64 = encode_image(img_path)
-            issues = call_poe_review(api_key, page_image_b64, xml_content)
+            issues = call_api_review(api_key, page_image_b64, xml_content)
 
             out_path = dsl_dir / f"review-page-{page_num}.json"
             out_path.write_text(json.dumps(issues, ensure_ascii=False, indent=2))

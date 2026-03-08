@@ -19,7 +19,7 @@ Converts a PDF into a high-fidelity editable DOCX.
 2. **PDF → PNGs** — renders reference images at 200 DPI via `pdftocairo`
 3. **Metadata extraction** — page dimensions, fonts, full text
 4. **OCR** — `uv run glmocr parse` produces structured JSON + markdown + cropped images
-5. **Style extraction** — VLM (Poe AI) infers font sizes, colors, alignment per region
+5. **Style extraction** — VLM (OpenCode Zen, kimi-k2.5) infers font sizes, colors, alignment per region
 6. **XML DSL generation** — fixed script converts OCR + styles into per-page XML files
 7. **VLM review** — compares XML DSL against original images; agent fixes issues
 8. **DSL → DOCX** — deterministic assembly via fixed `dsl_to_docx.py`
@@ -32,7 +32,7 @@ Converts a PDF into a high-fidelity editable DOCX.
 - XML DSL in `dsl/page-{N}.xml` is the agent-editable intermediate format
 - OCR `bbox_2d` values are normalized 0–1000, not pixels
 - Cropped image index is a sequential counter per page, not the region index
-- `POE_API_KEY` env var enables style extraction + VLM review; pipeline works without it (falls back to defaults)
+- `OPENCODE_ZEN_API_KEY` env var enables style extraction + VLM review; pipeline works without it (falls back to defaults)
 
 ---
 
@@ -134,7 +134,7 @@ Converts one or more scanned/photographed images (representing document pages) i
 ### Prerequisites
 
 - `uv` (Python package runner) — required
-- `POE_API_KEY` env var — optional; enables VLM style extraction and review (improves quality)
+- `OPENCODE_ZEN_API_KEY` env var — optional; enables VLM style extraction and review (improves quality)
 - `soffice` (LibreOffice) — optional; enables visual verification step
 
 ### Pipeline
@@ -142,7 +142,7 @@ Converts one or more scanned/photographed images (representing document pages) i
 1. **Prepare images** — natural-sort images, convert to PNG for VLM reference, measure dimensions in pts, write `image-info.json`
 2. **Per-page OCR** — `uv run glmocr parse` on each page, producing structured JSON + markdown + cropped images
 3. **Consolidate OCR** — merge per-page results into pdf-to-docx compatible `ocr-output/input/` structure, rename crop images with correct page indices
-4. **Style extraction** — VLM (Poe AI) infers font sizes, colors, alignment per region *(reuses pdf-to-docx)*
+4. **Style extraction** — VLM (OpenCode Zen, kimi-k2.5) infers font sizes, colors, alignment per region *(reuses pdf-to-docx)*
 5. **XML DSL generation** — converts OCR + styles into per-page XML files with page dimensions from `image-info.json` *(reuses pdf-to-docx)*
 6. **VLM review** — compares XML DSL against original images; agent fixes issues *(reuses pdf-to-docx)*
 7. **DSL → DOCX** — deterministic assembly *(reuses pdf-to-docx)*

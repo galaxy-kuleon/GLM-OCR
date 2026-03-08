@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""extract_styles.py - Extract text styling from PDF page images using Poe AI.
+"""extract_styles.py - Extract text styling from PDF page images using OpenCode Zen API.
 
 Usage:
-    python extract_styles.py --workspace PATH --pages N [--poe-api-key KEY]
+    python extract_styles.py --workspace PATH --pages N [--zen-api-key KEY]
 
-For each page, calls Poe AI (kimi-k2.5) with a simplified prompt to
+For each page, calls OpenCode Zen (kimi-k2.5) with a simplified prompt to
 extract font size, bold, color, and alignment per OCR region.
 
 Output: $WORKSPACE/ocr-output/input/style-page-{N}.json (1-based, per page)
 
-If Poe API is unavailable, falls back to pure defaults (pipeline continues).
-API key is read from --poe-api-key argument or POE_API_KEY environment variable
+If API is unavailable, falls back to pure defaults (pipeline continues).
+API key is read from --zen-api-key argument or OPENCODE_ZEN_API_KEY environment variable
 or .env file in workspace.
 """
 
@@ -32,8 +32,8 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 
-POE_API_URL = "https://api.poe.com/v1/chat/completions"
-POE_MODEL = "kimi-k2.5"
+API_URL = "https://opencode.ai/zen/v1/chat/completions"
+API_MODEL = "kimi-k2.5"
 
 SYSTEM_PROMPT = """You analyze document page images and describe text styling.
 For each numbered text region, report: font size (pt), bold (true/false),
@@ -157,24 +157,24 @@ STYLE_DEFAULTS = {
 
 
 def load_api_key(args_key, workspace):
-    """Load Poe API key from args, env, or .env file."""
+    """Load API key from args, env, or .env file."""
     if args_key:
         return args_key
-    if os.environ.get("POE_API_KEY"):
-        return os.environ["POE_API_KEY"]
+    if os.environ.get("OPENCODE_ZEN_API_KEY"):
+        return os.environ["OPENCODE_ZEN_API_KEY"]
     # Try .env file in workspace
     env_file = Path(workspace) / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
-            if line.startswith("POE_API_KEY="):
+            if line.startswith("OPENCODE_ZEN_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     # Try .env in current directory
     cwd_env = Path(".env")
     if cwd_env.exists():
         for line in cwd_env.read_text().splitlines():
             line = line.strip()
-            if line.startswith("POE_API_KEY="):
+            if line.startswith("OPENCODE_ZEN_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     return None
 
@@ -311,8 +311,8 @@ def extract_table_metadata(html_content):
     return (num_rows, max_cols)
 
 
-def call_poe_table_cell_styles(api_key, page_image_b64, num_rows, num_cols):
-    """Call Poe AI to extract cell-level color overrides from a table image.
+def call_api_table_cell_styles(api_key, page_image_b64, num_rows, num_cols):
+    """Call OpenCode Zen API to extract cell-level color overrides from a table image.
 
     Returns dict with col_colors, row_colors, cell_colors or empty dict on failure.
     """
@@ -322,7 +322,7 @@ def call_poe_table_cell_styles(api_key, page_image_b64, num_rows, num_cols):
     user_prompt = TABLE_CELL_STYLE_PROMPT.format(num_rows=num_rows, num_cols=num_cols, last_row=num_rows - 1)
 
     payload = {
-        "model": POE_MODEL,
+        "model": API_MODEL,
         "messages": [
             {"role": "system", "content": TABLE_CELL_STYLE_SYSTEM},
             {
@@ -345,7 +345,7 @@ def call_poe_table_cell_styles(api_key, page_image_b64, num_rows, num_cols):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
+    resp = requests.post(API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()
@@ -402,15 +402,15 @@ def call_poe_table_cell_styles(api_key, page_image_b64, num_rows, num_cols):
     return {"col_colors": [], "row_colors": [], "cell_colors": [], "keyword_styles": []}
 
 
-def call_poe_api(api_key, page_image_b64, regions_summary):
-    """Call Poe AI API and return parsed JSON array."""
+def call_api(api_key, page_image_b64, regions_summary):
+    """Call OpenCode Zen API and return parsed JSON array."""
     if requests is None:
         raise RuntimeError("requests library not available")
 
     user_prompt = USER_PROMPT_TEMPLATE.format(regions_summary=regions_summary)
 
     payload = {
-        "model": POE_MODEL,
+        "model": API_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -433,7 +433,7 @@ def call_poe_api(api_key, page_image_b64, regions_summary):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=300)
+    resp = requests.post(API_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     data = resp.json()
@@ -464,11 +464,11 @@ def call_poe_api(api_key, page_image_b64, regions_summary):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Extract text styles using Poe AI")
+    parser = argparse.ArgumentParser(description="Extract text styles using OpenCode Zen API")
     parser.add_argument("--workspace", required=True, help="Workspace directory path")
     parser.add_argument("--pages", required=True, type=int, help="Total page count")
     parser.add_argument(
-        "--poe-api-key", default=None, help="Poe API key (or set POE_API_KEY env)"
+        "--zen-api-key", default=None, help="OpenCode Zen API key (or set OPENCODE_ZEN_API_KEY env)"
     )
     args = parser.parse_args()
 
@@ -485,13 +485,13 @@ def main():
         ocr_data = json.load(f)
 
     # Load API key
-    api_key = load_api_key(args.poe_api_key, workspace)
+    api_key = load_api_key(args.zen_api_key, workspace)
     api_available = api_key is not None and requests is not None
 
     if not api_available:
         if not api_key:
             print(
-                "Warning: POE_API_KEY not found. Using default styles only.",
+                "Warning: OPENCODE_ZEN_API_KEY not found. Using default styles only.",
                 file=sys.stderr,
             )
         if requests is None:
@@ -537,7 +537,7 @@ def main():
         try:
             page_image_b64 = encode_image(img_path)
             regions_summary = build_regions_summary(page_regions)
-            vlm_result = call_poe_api(api_key, page_image_b64, regions_summary)
+            vlm_result = call_api(api_key, page_image_b64, regions_summary)
 
             # Expand and validate entries
             styles = [expand_style_entry(entry, page_regions) for entry in vlm_result]
@@ -569,7 +569,7 @@ def main():
                 if num_rows == 0 or num_cols == 0:
                     continue
                 try:
-                    cell_overrides = call_poe_table_cell_styles(
+                    cell_overrides = call_api_table_cell_styles(
                         api_key, page_image_b64, num_rows, num_cols
                     )
                     # Attach cell_overrides to the matching style entry

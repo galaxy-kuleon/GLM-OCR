@@ -37,7 +37,7 @@ Convert one or more scanned/photographed images (representing document pages) in
    WORKSPACE="$(pwd)/$OUTPUT_DIR/${FIRST_STEM}-img-docx-workspace"
    mkdir -p "$WORKSPACE"
    ```
-5. Warn (but continue) if `POE_API_KEY` is not set — style extraction and VLM review will fall back to defaults.
+5. Warn (but continue) if `OPENCODE_ZEN_API_KEY` is not set — style extraction and VLM review will fall back to defaults.
 
 ---
 

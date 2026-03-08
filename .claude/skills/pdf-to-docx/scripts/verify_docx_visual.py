@@ -2,7 +2,7 @@
 """verify_docx_visual.py - Visual comparison of DOCX output against original PDF.
 
 Usage:
-    python verify_docx_visual.py --workspace PATH --pages N --docx PATH [--poe-api-key KEY]
+    python verify_docx_visual.py --workspace PATH --pages N --docx PATH [--zen-api-key KEY]
 
 Renders the DOCX to PNGs via soffice+pdftocairo, then uses VLM to compare
 each page against the original PDF page images.
@@ -30,8 +30,8 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 
-POE_API_URL = "https://api.poe.com/v1/chat/completions"
-POE_MODEL = "kimi-k2.5"
+API_URL = "https://opencode.ai/zen/v1/chat/completions"
+API_MODEL = "kimi-k2.5"
 
 SYSTEM_PROMPT_MATCHED = """You compare two document page images: the Original PDF (first image) and a DOCX rendering (second image), along with the XML DSL that produced the DOCX.
 Find visual differences and provide QUANTITATIVE, ACTIONABLE fixes referencing specific XML DSL attributes.
@@ -164,22 +164,22 @@ Only output JSON object."""
 # ---------------------------------------------------------------------------
 
 def load_api_key(args_key, workspace):
-    """Load Poe API key from args, env, or .env file."""
+    """Load API key from args, env, or .env file."""
     if args_key:
         return args_key
-    if os.environ.get("POE_API_KEY"):
-        return os.environ["POE_API_KEY"]
+    if os.environ.get("OPENCODE_ZEN_API_KEY"):
+        return os.environ["OPENCODE_ZEN_API_KEY"]
     env_file = Path(workspace) / ".env"
     if env_file.exists():
         for line in env_file.read_text().splitlines():
             line = line.strip()
-            if line.startswith("POE_API_KEY="):
+            if line.startswith("OPENCODE_ZEN_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     cwd_env = Path(".env")
     if cwd_env.exists():
         for line in cwd_env.read_text().splitlines():
             line = line.strip()
-            if line.startswith("POE_API_KEY="):
+            if line.startswith("OPENCODE_ZEN_API_KEY="):
                 return line.split("=", 1)[1].strip().strip("\"'")
     return None
 
@@ -238,13 +238,13 @@ def find_input_page_png(workspace, page_num):
     return None
 
 
-def call_poe_visual_compare(api_key, content_parts, system_prompt, timeout=300):
-    """Call Poe AI for visual comparison."""
+def call_api_visual_compare(api_key, content_parts, system_prompt, timeout=300):
+    """Call OpenCode Zen API for visual comparison."""
     if requests is None:
         raise RuntimeError("requests library not available")
 
     payload = {
-        "model": POE_MODEL,
+        "model": API_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": content_parts},
@@ -258,7 +258,7 @@ def call_poe_visual_compare(api_key, content_parts, system_prompt, timeout=300):
         "Content-Type": "application/json",
     }
 
-    resp = requests.post(POE_API_URL, json=payload, headers=headers, timeout=timeout)
+    resp = requests.post(API_URL, json=payload, headers=headers, timeout=timeout)
     resp.raise_for_status()
 
     data = resp.json()
@@ -290,7 +290,7 @@ def compare_per_page(api_key, input_png, docx_png, page_num, xml_content=""):
         {"type": "text", "text": prompt},
     ]
 
-    result = call_poe_visual_compare(api_key, content_parts, SYSTEM_PROMPT_MATCHED)
+    result = call_api_visual_compare(api_key, content_parts, SYSTEM_PROMPT_MATCHED)
     if isinstance(result, list):
         return result
     return []
@@ -312,7 +312,7 @@ def compare_multi_page_matched(api_key, input_pngs, docx_pngs, page_numbers, xml
 
     content_parts.append({"type": "text", "text": USER_PROMPT_MULTI_MATCHED.format(all_xml_content=all_xml_content)})
 
-    result = call_poe_visual_compare(api_key, content_parts, SYSTEM_PROMPT_MATCHED)
+    result = call_api_visual_compare(api_key, content_parts, SYSTEM_PROMPT_MATCHED)
 
     if isinstance(result, dict):
         normalized = {}
@@ -352,7 +352,7 @@ def compare_mismatched(api_key, input_pngs, docx_pngs, input_pages, docx_pages, 
         content_parts.append({"type": "text", "text": prompt})
 
         system = SYSTEM_PROMPT_MISMATCHED.format(input_pages=input_pages, docx_pages=docx_pages)
-        result = call_poe_visual_compare(api_key, content_parts, system)
+        result = call_api_visual_compare(api_key, content_parts, system)
 
         if isinstance(result, dict):
             normalized = {}
@@ -395,7 +395,7 @@ def compare_mismatched(api_key, input_pngs, docx_pngs, input_pages, docx_pages, 
             system = SYSTEM_PROMPT_MISMATCHED.format(input_pages=input_pages, docx_pages=docx_pages)
 
             try:
-                result = call_poe_visual_compare(api_key, content_parts, system)
+                result = call_api_visual_compare(api_key, content_parts, system)
                 if isinstance(result, dict):
                     issues = result.get(pn, result.get(f"page_{pn}", []))
                     results[pn] = issues if isinstance(issues, list) else []
@@ -419,7 +419,7 @@ def main():
     parser.add_argument("--workspace", required=True, help="Workspace directory path")
     parser.add_argument("--pages", required=True, type=int, help="Input PDF page count")
     parser.add_argument("--docx", required=True, help="Path to output DOCX file")
-    parser.add_argument("--poe-api-key", default=None, help="Poe API key")
+    parser.add_argument("--zen-api-key", default=None, help="OpenCode Zen API key")
     args = parser.parse_args()
 
     workspace = Path(args.workspace)
@@ -440,9 +440,9 @@ def main():
         print(f"Error: DOCX file not found: {docx_path}", file=sys.stderr)
         sys.exit(1)
 
-    api_key = load_api_key(args.poe_api_key, workspace)
+    api_key = load_api_key(args.zen_api_key, workspace)
     if not api_key:
-        print("WARNING: POE_API_KEY not found. Skipping visual verification.", file=sys.stderr)
+        print("WARNING: OPENCODE_ZEN_API_KEY not found. Skipping visual verification.", file=sys.stderr)
         for pn in range(1, input_pages + 1):
             out_path = dsl_dir / f"visual-review-page-{pn}.json"
             out_path.write_text("[]")

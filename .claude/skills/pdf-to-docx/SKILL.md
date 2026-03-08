@@ -38,17 +38,17 @@ command -v pdftotext  || echo "MISSING: pdftotext (install poppler-utils)"
 command -v uv         || echo "MISSING: uv"
 ```
 
-### Check Poe API key
+### Check OpenCode Zen API key
 
 ```bash
-# Check for POE_API_KEY in env or .env file
-if [ -z "$POE_API_KEY" ]; then
-  if [ -f ".env" ] && grep -q "POE_API_KEY" .env; then
-    export POE_API_KEY=$(grep "POE_API_KEY" .env | cut -d'=' -f2 | tr -d '"' | tr -d "'")
+# Check for OPENCODE_ZEN_API_KEY in env or .env file
+if [ -z "$OPENCODE_ZEN_API_KEY" ]; then
+  if [ -f ".env" ] && grep -q "OPENCODE_ZEN_API_KEY" .env; then
+    export OPENCODE_ZEN_API_KEY=$(grep "OPENCODE_ZEN_API_KEY" .env | cut -d'=' -f2 | tr -d '"' | tr -d "'")
   fi
 fi
-if [ -z "$POE_API_KEY" ]; then
-  echo "WARNING: POE_API_KEY not found. Style extraction will use defaults only."
+if [ -z "$OPENCODE_ZEN_API_KEY" ]; then
+  echo "WARNING: OPENCODE_ZEN_API_KEY not found. Style extraction will use defaults only."
 fi
 ```
 
@@ -167,7 +167,7 @@ Image files are named `cropped_page{N}_idx{M}.jpg` where:
 
 ---
 
-## Step 4: Style Extraction (Poe AI)
+## Step 4: Style Extraction (OpenCode Zen)
 
 Run the fixed script to extract styles per page:
 
@@ -177,13 +177,13 @@ uv run --with requests,Pillow \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
 ```
 
-**What this does**: For each page, sends the page image + region summary to Poe AI (`kimi-k2.5`) and receives simplified style data (font size, bold, color, alignment). Results are saved as `$WORKSPACE/ocr-output/input/style-page-{N}.json`.
+**What this does**: For each page, sends the page image + region summary to OpenCode Zen (kimi-k2.5) and receives simplified style data (font size, bold, color, alignment). Results are saved as `$WORKSPACE/ocr-output/input/style-page-{N}.json`.
 
 **Table cell-level style extraction**: For each table region, the script performs a second VLM call to detect non-default text colors and background colors at the column/row/cell level. This captures per-cell styling that would otherwise be lost when OCR treats the entire table as one region. Results are stored in the `cell_overrides` field of the style entry.
 
 **Agent does NOT generate any script** — only executes the fixed script.
 
-**Fallback**: If Poe API is unavailable, the script automatically uses default styles by `native_label`. The pipeline continues without interruption. Table cell-level extraction is best-effort — if it fails, the pipeline continues with region-level styles only.
+**Fallback**: If API is unavailable, the script automatically uses default styles by `native_label`. The pipeline continues without interruption. Table cell-level extraction is best-effort — if it fails, the pipeline continues with region-level styles only.
 
 ### Style JSON output format
 
@@ -292,7 +292,7 @@ uv run --with requests,lxml,Pillow \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
 ```
 
-**What this does**: Compares XML DSL against page images using Poe AI.
+**What this does**: Compares XML DSL against page images using OpenCode Zen (kimi-k2.5).
 
 **Multi-page mode** (≤5 pages): All page PNGs + all XML DSLs are sent in a single API call. This enables cross-page consistency checking (font sizes, colors, column widths). The VLM responds with a JSON object keyed by page number. Timeout is 300 seconds for multi-image calls.
 
@@ -467,8 +467,8 @@ Report to the user:
 - XML DSL files are human-readable and can be manually edited for fine-tuning
 - VLM review compares XML text vs page image (not two images) — works well with weak models
 - Style extraction uses simplified prompts (5-6 fields) instead of complex nested JSON
-- Pipeline does NOT require ollama — uses Poe AI (`https://api.poe.com/v1/chat/completions`)
-- If `POE_API_KEY` is not set, pipeline still works with default styles
+- Pipeline does NOT require ollama — uses OpenCode Zen (`https://opencode.ai/zen/v1/chat/completions`)
+- If `OPENCODE_ZEN_API_KEY` is not set, pipeline still works with default styles
 - Heading styles in python-docx default to blue — `dsl_to_docx.py` overrides to black
 - `w:framePr` uses TWIPS (1 pt = 20 twips), NOT EMU
 - `soffice` (LibreOffice) is optional — only needed for Step 6.5 (DOCX Visual Verification). If not available, step is skipped
