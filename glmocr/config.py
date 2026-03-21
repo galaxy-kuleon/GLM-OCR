@@ -209,10 +209,11 @@ class LayoutConfig(_BaseConfig):
         """Validate the layout device string.
 
         Allowed values:
-        - None / null (auto-select based on CUDA availability)
+        - None / null (auto-select based on CUDA/MPS availability)
         - "cpu"
         - "cuda"
         - "cuda:<int>" (e.g., "cuda:0", "cuda:1")
+        - "mps" (Apple Silicon GPU)
         """
         if value is None:
             return value
@@ -220,7 +221,7 @@ class LayoutConfig(_BaseConfig):
         if v == "":
             # Treat empty string as "unset" for convenience.
             return None
-        if v == "cpu" or v == "cuda":
+        if v in ("cpu", "cuda", "mps"):
             return v
         if v.startswith("cuda:"):
             index_part = v[5:]
@@ -228,7 +229,7 @@ class LayoutConfig(_BaseConfig):
                 return v
         raise ValueError(
             "Invalid layout device value. Expected one of: None, 'cpu', 'cuda', "
-            "or 'cuda:<int>' (e.g., 'cuda:0')."
+            "'cuda:<int>' (e.g., 'cuda:0'), or 'mps'."
         )
 
 

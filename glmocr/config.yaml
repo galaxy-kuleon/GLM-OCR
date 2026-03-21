@@ -32,7 +32,7 @@ pipeline:
   #
   # Note: When maas.enabled=true, the ocr_api and layout settings below are ignored.
   maas:
-    enabled: true # Set to true to use MaaS mode
+    enabled: false # Set to true to use MaaS mode
     api_url: https://open.bigmodel.cn/api/paas/v4/layout_parsing
     model: glm-ocr
     api_key: null # Required! Get from https://open.bigmodel.cn
@@ -61,18 +61,18 @@ pipeline:
   ocr_api:
     # Basic connection
     api_host: 127.0.0.1
-    api_port: 8080
+    api_port: 11434
 
     # Model name included in API requests.
     # Required for mlx_vlm.server (e.g. "mlx-community/GLM-OCR-bf16").
     # Set to `glm-ocr` to match `--served-model-name` when using vLLM/SGLang.
     # For Ollama, set to your model name (e.g. "glm-ocr:latest").
-    model: glm-ocr
+    model: glm-ocr:bf16
 
     # URL construction: {api_scheme}://{api_host}:{api_port}{api_path}
     # Or set api_url directly to override
     api_scheme: null # null = auto (https if port 443, else http)
-    api_path: /v1/chat/completions
+    api_path: /api/generate
     # Note: If using Ollama and encountering 502 errors with vision requests,
     # try switching to "ollama_generate" mode with api_path: /api/generate
     api_url: null # full URL override (optional)
@@ -80,7 +80,7 @@ pipeline:
     # API mode: "openai" (default) or "ollama_generate"
     # - "openai": Use OpenAI-compatible /v1/chat/completions endpoint (vLLM/SGLang/Ollama)
     # - "ollama_generate": Use Ollama's native /api/generate endpoint
-    api_mode: openai
+    api_mode: ollama_generate
 
     # Authentication (for MaaS providers like Zhipu, OpenAI, etc.)
     api_key: null # or set ZHIPU_API_KEY env var

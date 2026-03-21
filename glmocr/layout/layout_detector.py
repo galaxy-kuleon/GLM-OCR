@@ -67,12 +67,16 @@ class PPDocLayoutDetector(BaseLayoutDetector):
         self._model.eval()
 
         # Device selection priority:
-        #   1. Explicit config.device ("cpu", "cuda", "cuda:N")
-        #   2. Auto: cuda:{cuda_visible_devices} if CUDA available, else CPU
+        #   1. Explicit config.device ("cpu", "cuda", "cuda:N", "mps")
+        #   2. Auto: cuda:{cuda_visible_devices} if CUDA available
+        #   3. Auto: mps if Apple Silicon GPU available
+        #   4. Fallback: CPU
         if self._config_device is not None:
             self._device = self._config_device
         elif torch.cuda.is_available() and self.cuda_visible_devices:
             self._device = f"cuda:{self.cuda_visible_devices}"
+        elif torch.backends.mps.is_available():
+            self._device = "mps"
         else:
             self._device = "cpu"
         self._model = self._model.to(self._device)
@@ -83,7 +87,7 @@ class PPDocLayoutDetector(BaseLayoutDetector):
     def stop(self):
         """Unload model and processor."""
         if self._model is not None:
-            if self._device.startswith("cuda"):
+            if self._device and self._device.startswith("cuda"):
                 torch.cuda.empty_cache()
             self._model = None
         self._image_processor = None
