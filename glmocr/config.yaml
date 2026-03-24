@@ -37,7 +37,7 @@ pipeline:
     model: glm-ocr
     api_key: null # Required! Get from https://open.bigmodel.cn
     verify_ssl: true
-    connect_timeout: 30
+    connect_timeout: 300
     request_timeout: 300
     retry_max_attempts: 2
     retry_backoff_base_seconds: 0.5
@@ -90,8 +90,8 @@ pipeline:
     verify_ssl: false
 
     # Timeouts (seconds)
-    connect_timeout: 30
-    request_timeout: 120
+    connect_timeout: 300
+    request_timeout: 300
 
     # Retry settings (helps with transient 429/5xx and overloaded OCR servers)
     retry_max_attempts: 2

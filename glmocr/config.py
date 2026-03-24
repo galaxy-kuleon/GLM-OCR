@@ -134,7 +134,7 @@ class MaaSApiConfig(_BaseConfig):
     verify_ssl: bool = True
 
     # Timeouts (seconds)
-    connect_timeout: int = 30
+    connect_timeout: int = 300
     request_timeout: int = 300
 
     # Retry settings
