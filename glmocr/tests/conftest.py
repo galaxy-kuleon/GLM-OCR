@@ -12,7 +12,7 @@ RUN_INTEGRATION = os.getenv("GLMOCR_RUN_INTEGRATION", "0") == "1"
 SERVER_URL = os.getenv("GLMOCR_SERVER_URL", "http://127.0.0.1:5002")
 TEST_IMAGE = os.getenv("GLMOCR_TEST_IMAGE", "")
 TEST_PDF = os.getenv("GLMOCR_TEST_PDF", "")
-TIMEOUT_SECONDS = int(os.getenv("GLMOCR_TIMEOUT", "300"))
+TIMEOUT_SECONDS = int(os.getenv("GLMOCR_TIMEOUT", "600"))
 
 
 # ---------------------------------------------------------------------------

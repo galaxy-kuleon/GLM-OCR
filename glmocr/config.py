@@ -93,8 +93,8 @@ class OCRApiConfig(_BaseConfig):
     # Use "ollama_generate" for Ollama's native /api/generate endpoint
     api_mode: str = "openai"
 
-    connect_timeout: int = 300
-    request_timeout: int = 300
+    connect_timeout: int = 600
+    request_timeout: int = 600
 
     # Retry behavior (for transient upstream failures like 429/5xx)
     retry_max_attempts: int = 2  # total attempts = 1 + retry_max_attempts
@@ -134,8 +134,8 @@ class MaaSApiConfig(_BaseConfig):
     verify_ssl: bool = True
 
     # Timeouts (seconds)
-    connect_timeout: int = 300
-    request_timeout: int = 300
+    connect_timeout: int = 600
+    request_timeout: int = 600
 
     # Retry settings
     retry_max_attempts: int = 2
@@ -247,7 +247,7 @@ class PipelineConfig(_BaseConfig):
     layout: LayoutConfig = Field(default_factory=LayoutConfig)
 
     # Parallel recognition workers (VLM/API concurrent requests)
-    max_workers: int = 16
+    max_workers: int = 2
 
     # Queue sizes for async pipeline.
     page_maxsize: int = 100
