@@ -288,8 +288,8 @@ pipeline:
     api_host: localhost
     api_port: 8080
     api_key: null # or set API_KEY env var
-    connect_timeout: 30
-    request_timeout: 120
+    connect_timeout: 600
+    request_timeout: 600
 
   # Page loader settings
   page_loader:

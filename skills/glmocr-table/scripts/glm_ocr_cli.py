@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
-DEFAULT_TIMEOUT = 60  # seconds
+DEFAULT_TIMEOUT = 600  # seconds
 API_GUIDE_URL = "https://open.bigmodel.cn/usercenter/apikeys"
 OFFICIAL_API_URL = "https://open.bigmodel.cn/api/paas/v4/layout_parsing"
 

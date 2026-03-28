@@ -71,7 +71,7 @@ class LayoutAndOCRClient:
     # 默认的layout和OCR提示词
     DEFAULT_PROMPT = "<|PIPELINE_DOCUMENT_RECOGNITION|>"
 
-    def __init__(self, service_url: Optional[str] = None, timeout: float = 120.0):
+    def __init__(self, service_url: Optional[str] = None, timeout: float = 600.0):
         """初始化LayoutAndOCR客户端。
 
         Args:
