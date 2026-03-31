@@ -555,6 +555,32 @@ def indent_xml(element):
     return etree.tostring(element, pretty_print=True, encoding="unicode")
 
 
+def page_xml_exists(workspace, page_num):
+    """Check if valid VLM XML already exists for a page.
+
+    Used to skip pages that were already generated in a previous (possibly
+    interrupted) run.  Returns True only when the file exists AND contains
+    recognisable XML (the ``<page`` opening tag must appear in the first
+    200 characters).  A pure size heuristic would accept non-XML garbage
+    (e.g. error messages, truncated responses) and permanently skip the
+    page on subsequent re-runs.
+    """
+    path = os.path.join(workspace, "dsl-vlm", f"page-{page_num}.xml")
+    if not os.path.exists(path):
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read(200)  # Read first 200 chars
+        return "<page" in content
+    except (IOError, UnicodeDecodeError):
+        return False
+
+
+def all_batch_pages_exist(workspace, start, end):
+    """Return True if every page in range [start, end] already has XML."""
+    return all(page_xml_exists(workspace, n) for n in range(start, end + 1))
+
+
 def save_page_xml(page_element, workspace, page_number):
     """Save a single page element to $WORKSPACE/dsl-vlm/page-{N}.xml."""
     output_dir = os.path.join(workspace, "dsl-vlm")
@@ -577,12 +603,17 @@ def save_raw_response(raw_text, workspace, batch_index):
     return path
 
 
-def process_batch(workspace, image_info, start, end, batch_index, total_batches):
+def process_batch(workspace, image_info, start, end, batch_index, total_batches,
+                   total_pages):
     """Process a single batch: call VLM, parse response, save XMLs.
+
+    Prints per-page progress lines so that calling agents can see the
+    script is making forward progress (prevents premature timeout kills).
 
     Returns the number of pages successfully saved.
     """
-    print(f"Batch {batch_index}/{total_batches}: sending pages {start}-{end}...")
+    batch_t0 = time.time()
+    print(f"[VLM] Batch {batch_index}/{total_batches}: sending pages {start}-{end}...")
 
     messages = build_messages(workspace, image_info, start, end)
 
@@ -594,6 +625,8 @@ def process_batch(workspace, image_info, start, end, batch_index, total_batches)
         print(f"  FIX: If timeout, increase VLM_TIMEOUT (current: {VLM_TIMEOUT}s).", file=sys.stderr)
         return 0
 
+    vlm_elapsed = time.time() - batch_t0
+    print(f"  VLM responded in {vlm_elapsed:.0f}s")
     print_token_usage(response)
     raw_text = extract_response_text(response)
 
@@ -625,8 +658,12 @@ def process_batch(workspace, image_info, start, end, batch_index, total_batches)
             page_num = expected_pages[i] if i < len(expected_pages) else start + i
 
         path = save_page_xml(page_el, workspace, page_num)
-        print(f"  Saved {path}")
         saved_count += 1
+
+        # Per-page progress line — visible heartbeat for agent timeout prevention
+        batch_elapsed = time.time() - batch_t0
+        print(f"[VLM] Page {page_num}/{total_pages} complete "
+              f"(batch {batch_index}/{total_batches}, {batch_elapsed:.0f}s elapsed)")
 
     return saved_count
 
@@ -667,20 +704,51 @@ def main():
     image_info = load_image_info(workspace)
     batches = compute_batches(total_pages, batch_size)
 
+    # Count pages already generated (from a previous or interrupted run)
+    pre_existing = sum(1 for n in range(1, total_pages + 1)
+                       if page_xml_exists(workspace, n))
+
     print(f"Model profile: {VLM_MODEL_PROFILE}")
     print(f"Processing {total_pages} pages in {len(batches)} batch(es) "
           f"(batch size: {batch_size})")
+    if pre_existing:
+        print(f"[VLM] Found {pre_existing}/{total_pages} pages already generated — "
+              "skipping existing pages")
 
-    total_saved = 0
+    run_t0 = time.time()
+    batches_skipped = 0
     for batch_idx, (start, end) in enumerate(batches, start=1):
-        saved = process_batch(workspace, image_info, start, end, batch_idx, len(batches))
-        total_saved += saved
+        # Skip batch if ALL pages in range already have valid XML
+        if all_batch_pages_exist(workspace, start, end):
+            batches_skipped += 1
+            print(f"[VLM] Batch {batch_idx}/{len(batches)}: "
+                  f"pages {start}-{end} already exist, skipping")
+            continue
 
-    print(f"\nDone. Saved {total_saved}/{total_pages} page XML files.")
-    if total_saved < total_pages:
-        print("WARNING: Some pages were not saved. Check errors above.",
-              file=sys.stderr)
+        process_batch(workspace, image_info, start, end,
+                      batch_idx, len(batches), total_pages)
+
+    # Recount from disk — avoids double-counting when a batch regenerates
+    # pages that pre_existing already counted (strong profile, partial batch)
+    total_present = sum(1 for n in range(1, total_pages + 1)
+                        if page_xml_exists(workspace, n))
+
+    elapsed = time.time() - run_t0
+    print(f"\n[VLM] Done. {total_present}/{total_pages} page XML files present "
+          f"({batches_skipped} batches skipped, {elapsed:.0f}s elapsed).")
+
+    if total_present == 0:
+        print("ERROR: No pages were saved. Check errors above.", file=sys.stderr)
         sys.exit(1)
+    elif total_present < total_pages:
+        missing = [n for n in range(1, total_pages + 1)
+                   if not page_xml_exists(workspace, n)]
+        print(f"WARNING: {len(missing)} pages missing: {missing}. "
+              "Re-run to generate only the missing pages.",
+              file=sys.stderr)
+        # Exit 0 — partial success is still usable by downstream merge
+        # which falls back to OCR-only for missing VLM pages
+        sys.exit(0)
 
 
 if __name__ == "__main__":

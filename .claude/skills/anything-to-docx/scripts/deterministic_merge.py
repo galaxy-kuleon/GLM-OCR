@@ -28,6 +28,7 @@ from pathlib import Path
 from lxml import etree
 
 from constants import (
+    IMAGE_JPEG_QUALITY,
     MERGE_ACCEPT_THRESHOLD,
     MERGE_BASE_SIM_THRESHOLD,
     MERGE_DEFAULT_FONT_SIZE_PT,
@@ -191,10 +192,16 @@ def compute_bbox_iou(bbox_a, bbox_b):
 
 
 def _parse_bbox_attr(bbox_str):
-    """Parse a bbox attribute string 'x1,y1,x2,y2' into a list of floats."""
+    """Parse a bbox attribute string 'x1,y1,x2,y2' into a list of floats.
+
+    Returns None for missing, empty, malformed, or non-numeric bbox strings.
+    """
     if not bbox_str:
         return None
-    parts = [float(x.strip()) for x in bbox_str.split(",")]
+    try:
+        parts = [float(x.strip()) for x in bbox_str.split(",")]
+    except (ValueError, TypeError):
+        return None
     return parts if len(parts) == 4 else None
 
 
@@ -398,7 +405,7 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
     vlm_elements = collect_text_elements(page_el)
 
     if not vlm_elements or not text_regions:
-        return 0, len(vlm_elements)
+        return 0, len(vlm_elements), []
 
     # Greedy sequential matching with symmetric look-around
     consumed = set()
@@ -515,10 +522,13 @@ def resolve_images(page_el, ocr_regions, page_num):
 
     Modifies page_el in place. Returns count of resolved images.
     """
-    image_regions = [
+    raw_image_regions = [
         r for r in ocr_regions
         if r.get("label") == "image"
     ]
+    image_regions = _dedup_image_regions(raw_image_regions)
+    if len(image_regions) < len(raw_image_regions):
+        print(f"  Page {page_num}: deduped {len(raw_image_regions) - len(image_regions)} superset image regions")
 
     vlm_images = page_el.findall(".//image")
     resolved = 0
@@ -782,6 +792,113 @@ def _clean_vlm_xml_artifacts(page_el):
                 elem.text = cleaned if cleaned else None
 
 
+def _cleanup_placeholder_images(page_el):
+    """Remove all <image> elements with unresolved PLACEHOLDER/empty src.
+
+    Returns the count of removed elements. Pure function on the page element
+    tree — safe to call on any code path before serialization.
+    """
+    removed = 0
+    for img_el in page_el.findall(".//image"):
+        if img_el.get("src") in ("PLACEHOLDER", "", None):
+            img_el.getparent().remove(img_el)
+            removed += 1
+    return removed
+
+
+def _self_crop_placeholder_images(page_el, workspace, page_num):
+    """Crop PLACEHOLDER images from the page image using their bbox.
+
+    When VLM detects an image region (e.g., a logo, watermark, or photo)
+    but OCR didn't crop it, we can still recover the image by cropping
+    directly from the rendered page image.
+
+    Only touches <image> elements where src is still PLACEHOLDER and a
+    valid bbox attribute exists. Leaves src unchanged if cropping fails
+    (missing page image, bad bbox, zero-area crop) so that
+    _cleanup_placeholder_images can remove them later.
+
+    Args:
+        page_el: lxml Element — the <page> being processed
+        workspace: workspace directory path (str or Path)
+        page_num: 1-based page number
+
+    Returns:
+        Count of images successfully self-cropped.
+    """
+    from PIL import Image  # lazy import — Pillow not always in --with
+
+    page_img_path = Path(workspace) / "input-images" / f"page-{page_num}.png"
+    if not page_img_path.exists():
+        return 0
+
+    # Collect PLACEHOLDER images that have a bbox
+    placeholder_imgs = []
+    for img_el in page_el.findall(".//image"):
+        if img_el.get("src") not in ("PLACEHOLDER", "", None):
+            continue
+        bbox = _parse_bbox_attr(img_el.get("bbox"))
+        if bbox is None:
+            continue
+        placeholder_imgs.append((img_el, bbox))
+
+    if not placeholder_imgs:
+        return 0
+
+    # Open page image once for all crops on this page
+    try:
+        page_img = Image.open(page_img_path)
+    except Exception as e:
+        print(f"  Page {page_num}: cannot open page image for self-crop: {e}",
+              file=sys.stderr)
+        return 0
+
+    img_width, img_height = page_img.size
+
+    # Create output directory on first successful crop
+    crop_dir = Path(workspace) / "self-cropped"
+    crop_dir_created = False
+
+    cropped_count = 0
+    for img_el, bbox in placeholder_imgs:
+        # bbox is normalized 0-1000 -> convert to pixel coordinates
+        x1, y1, x2, y2 = bbox
+        pixel_x1 = int(x1 / 1000 * img_width)
+        pixel_y1 = int(y1 / 1000 * img_height)
+        pixel_x2 = int(x2 / 1000 * img_width)
+        pixel_y2 = int(y2 / 1000 * img_height)
+
+        # Validate: non-zero area
+        if pixel_x2 <= pixel_x1 or pixel_y2 <= pixel_y1:
+            continue
+
+        try:
+            cropped = page_img.crop((pixel_x1, pixel_y1, pixel_x2, pixel_y2))
+        except Exception:
+            continue
+
+        if not crop_dir_created:
+            crop_dir.mkdir(parents=True, exist_ok=True)
+            crop_dir_created = True
+
+        # Filename encodes page + bbox for uniqueness and debuggability
+        bbox_tag = f"{int(x1)}_{int(y1)}_{int(x2)}_{int(y2)}"
+        filename = f"page{page_num}_bbox{bbox_tag}.jpg"
+        crop_path = crop_dir / filename
+
+        try:
+            cropped.save(str(crop_path), "JPEG", quality=IMAGE_JPEG_QUALITY)
+        except Exception:
+            continue
+
+        # src is relative to workspace (same convention as OCR images)
+        img_el.set("src", f"self-cropped/{filename}")
+        cropped_count += 1
+
+    page_img.close()
+    return cropped_count
+
+
 def _dedup_consecutive_elements(page_el):
     """Remove consecutive duplicate heading/paragraph elements.
 
@@ -843,6 +960,10 @@ def merge_page(workspace, page_num, ocr_data):
         if ocr_regions:
             print(f"  Page {page_num}: no VLM XML — generating from OCR ({len(ocr_regions)} regions)")
             page_el = _generate_page_from_ocr(ocr_regions, page_num, workspace=workspace)
+            # Clean PLACEHOLDERs from OCR-generated page (more image regions than cropped files)
+            ph_removed = _cleanup_placeholder_images(page_el)
+            if ph_removed:
+                print(f"  Page {page_num}: removed {ph_removed} unresolved placeholder images")
             return etree.tostring(page_el, encoding="unicode", pretty_print=True)
         return None
 
@@ -858,6 +979,14 @@ def merge_page(workspace, page_num, ocr_data):
 
     if not ocr_regions:
         print(f"  Page {page_num}: no OCR data, using VLM XML as-is")
+        # Try self-cropping VLM images that have bbox (no OCR crops available)
+        self_cropped = _self_crop_placeholder_images(page_el, workspace, page_num)
+        if self_cropped:
+            print(f"  Page {page_num}: self-cropped {self_cropped} images from page image")
+        # Still clean remaining PLACEHOLDERs — VLM may have emitted unresolvable refs
+        ph_removed = _cleanup_placeholder_images(page_el)
+        if ph_removed:
+            print(f"  Page {page_num}: removed {ph_removed} unresolved placeholder images")
         return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
     # Step 1: Replace text in headings/paragraphs
@@ -870,6 +999,10 @@ def merge_page(workspace, page_num, ocr_data):
     if total > 0 and replaced / total < MERGE_QUALITY_GATE_MATCH_RATE and len(ocr_text_regions) >= MERGE_QUALITY_GATE_MIN_OCR_REGIONS:
         print(f"  Page {page_num}: match rate {replaced/total:.0%} < 30% — switching to OCR-only")
         page_el = _generate_page_from_ocr(ocr_regions, page_num, workspace=workspace)
+        # Clean PLACEHOLDERs from OCR-generated page (more image regions than cropped files)
+        ph_removed = _cleanup_placeholder_images(page_el)
+        if ph_removed:
+            print(f"  Page {page_num}: removed {ph_removed} unresolved placeholder images")
         return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
     # Step 2: Improve table cell text
@@ -883,6 +1016,11 @@ def merge_page(workspace, page_num, ocr_data):
     if img_count:
         print(f"  Page {page_num}: resolved {img_count} image paths")
 
+    # Step 3b: Self-crop remaining PLACEHOLDER images from page image
+    self_cropped = _self_crop_placeholder_images(page_el, workspace, page_num)
+    if self_cropped:
+        print(f"  Page {page_num}: self-cropped {self_cropped} images from page image")
+
     # Step 4: Dedup — remove consecutive duplicate text after OCR replacement
     deduped = _dedup_consecutive_elements(page_el)
     if deduped:
@@ -895,11 +1033,7 @@ def merge_page(workspace, page_num, ocr_data):
             print(f"  Page {page_num}: appended {gap_count} OCR gap elements")
 
     # Step 6: Remove unresolved PLACEHOLDER images (avoids "[Image missing]" in DOCX)
-    placeholder_removed = 0
-    for img_el in page_el.findall(".//image"):
-        if img_el.get("src") in ("PLACEHOLDER", "", None):
-            img_el.getparent().remove(img_el)
-            placeholder_removed += 1
+    placeholder_removed = _cleanup_placeholder_images(page_el)
     if placeholder_removed:
         print(f"  Page {page_num}: removed {placeholder_removed} unresolved placeholder images")
 

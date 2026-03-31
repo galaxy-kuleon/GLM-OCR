@@ -425,7 +425,9 @@ uv run .claude/skills/shared/verify_step.py --step B2 --workspace "$WORKSPACE"
 
 ### B3: VLM Generate XML DSL
 
-**IMPORTANT: This command is SLOW** (1-5 minutes depending on page count). Set your bash timeout to at least 600 seconds. Do NOT interrupt or retry early.
+**IMPORTANT: This command is SLOW** (1-5 minutes depending on page count). **Set your bash timeout to at least 600 seconds** — for example: `timeout 600 uv run ...`, or configure your agent's bash timeout setting. Do NOT interrupt or retry early. The script prints `[VLM] Page N/M complete` progress lines as proof of forward progress — as long as these appear, the process is working.
+
+This script saves each page incrementally. If interrupted, re-run the same command and it will skip pages that already have valid XML in `dsl-vlm/`, regenerating only the missing ones.
 
 Run this exact command. The script handles batch size and prompt selection based on `$VLM_PROFILE`.
 
@@ -442,7 +444,7 @@ source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B3 --workspace "$WORKSPACE"
 ```
 
-**If verify fails:** Re-run the B3 command ONCE (maximum 1 retry). If the retry also fails, print `B3 FAILED -- VLM generation unsuccessful after 2 attempts` and STOP. Do NOT proceed to B4.
+**If verify fails:** Re-run the B3 command ONCE (maximum 1 retry). The script will only regenerate missing pages. If the retry also fails, print `B3 FAILED -- VLM generation unsuccessful after 2 attempts` and STOP. Do NOT proceed to B4.
 
 ### B4: Merge
 
@@ -451,7 +453,7 @@ Check `VLM_PROFILE` in `.atd-env.sh`. Run ONLY the block matching your profile.
 **If `VLM_PROFILE="weak"`** (this is the default for local models):
 ```bash
 source .atd-env.sh
-uv run --with lxml \
+uv run --with lxml,Pillow \
   .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
 ```
