@@ -280,7 +280,8 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
     Uses greedy sequential matching with a look-ahead window.
     Modifies page_el in place.
 
-    Returns (replaced_count, total_vlm_elements).
+    Returns (replaced_count, total_vlm_elements, unmatched_ocr_regions).
+    unmatched_ocr_regions: list of OCR text regions that had no VLM match.
     """
     # Separate OCR regions by type
     text_regions = []
@@ -363,7 +364,41 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
             ocr_cursor = best_idx + 1
             replaced += 1
 
-    return replaced, len(vlm_elements)
+    # Collect unmatched OCR text regions
+    unmatched = [text_regions[i] for i in range(len(text_regions)) if i not in consumed]
+    return replaced, len(vlm_elements), unmatched
+
+
+# ---------------------------------------------------------------------------
+# Gap filling: append OCR regions that VLM missed
+# ---------------------------------------------------------------------------
+
+
+def _append_gap_elements(page_el, unmatched_regions):
+    """Append unmatched OCR text regions as new elements at end of page.
+
+    Only appends regions with substantial content (>5 chars) to avoid noise.
+    Creates heading or paragraph elements based on OCR heading_level.
+    """
+    added = 0
+    for region in unmatched_regions:
+        content = region["content"]
+        if len(content) <= 5:
+            continue
+        hlevel = region.get("heading_level", 0)
+        if hlevel > 0:
+            elem = etree.SubElement(page_el, "heading",
+                                    level=str(hlevel), alignment="left")
+            size = _HEADING_FONT_SIZES.get(hlevel, "11")
+            run = etree.SubElement(elem, "run",
+                                   attrib={"font-size-pt": size, "bold": "true"})
+        else:
+            elem = etree.SubElement(page_el, "paragraph", alignment="left")
+            run = etree.SubElement(elem, "run",
+                                   attrib={"font-size-pt": "11"})
+        run.text = content
+        added += 1
+    return added
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +624,7 @@ def merge_page(workspace, page_num, ocr_data):
         return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
     # Step 1: Replace text in headings/paragraphs
-    replaced, total = match_and_replace_text(page_el, ocr_regions, page_num)
+    replaced, total, unmatched = match_and_replace_text(page_el, ocr_regions, page_num)
     print(f"  Page {page_num}: replaced {replaced}/{total} text elements")
 
     # Step 2: Improve table cell text
@@ -602,6 +637,12 @@ def merge_page(workspace, page_num, ocr_data):
     img_count = resolve_images(page_el, ocr_regions, page_num)
     if img_count:
         print(f"  Page {page_num}: resolved {img_count} image paths")
+
+    # Step 4: Gap filling — append OCR regions VLM missed
+    if unmatched:
+        gap_count = _append_gap_elements(page_el, unmatched)
+        if gap_count:
+            print(f"  Page {page_num}: appended {gap_count} OCR gap elements")
 
     return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
