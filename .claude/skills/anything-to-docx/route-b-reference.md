@@ -87,7 +87,7 @@ VLM scripts read these env vars (all optional, have sensible defaults):
 | `VLM_API_KEY` | `lm-studio` | API key (LMStudio ignores this) |
 | `VLM_TIMEOUT` | `600` | Request timeout in seconds |
 | `VLM_MAX_TOKENS` | profile-dependent | Max output tokens (strong: 131072, weak: 32768) |
-| `VLM_TEMPERATURE` | profile-dependent | Sampling temperature (strong: 0.6, weak: 0.3) |
+| `VLM_TEMPERATURE` | 0.6 | Sampling temperature (both profiles use 0.6) |
 | `VLM_RETRY_DELAY` | `120` | Seconds between retries |
 | `VLM_MERGE_IMAGE_WIDTH` | `1200` | Max image width for merge step (px) |
 

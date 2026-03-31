@@ -61,7 +61,7 @@ _PROFILE_DEFAULTS = {
     "weak": {
         "batch_size": 2,      # small context + limited capability
         "max_tokens": 32768,   # weak models may not sustain long output
-        "temperature": 0.3,    # more deterministic for structured output
+        "temperature": 0.6,    # qwen3.5 35b-a3b needs 0.6 for quality output
     },
 }
 
