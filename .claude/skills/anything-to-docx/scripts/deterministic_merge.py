@@ -564,7 +564,7 @@ def _try_replace_table_text(table_el, ocr_regions, page_num):
 # ---------------------------------------------------------------------------
 
 
-def _generate_page_from_ocr(ocr_regions, page_num, page_width=612, page_height=792):
+def _generate_page_from_ocr(ocr_regions, page_num, workspace=None, page_width=612, page_height=792):
     """Generate a <page> element purely from OCR data when VLM XML is missing.
 
     Creates headings, paragraphs, and image placeholders based on OCR regions.
@@ -583,7 +583,13 @@ def _generate_page_from_ocr(ocr_regions, page_num, page_width=612, page_height=7
     page_el.set("font-cjk", "SimSun")
 
     page_idx = page_num - 1  # 0-based for image path construction
-    img_counter = 0
+
+    # Pre-discover actual image files for this page (glob is more reliable
+    # than computing from JSON index, since glm-ocr uses its own numbering)
+    import glob as _glob
+    img_pattern = str(Path(workspace) / f"ocr-output/input/imgs/cropped_page{page_idx}_idx*.jpg") if workspace else ""
+    available_imgs = sorted(_glob.glob(img_pattern)) if img_pattern else []
+    img_queue = list(available_imgs)  # consume sequentially
 
     for region in ocr_regions:
         if region is None:
@@ -597,14 +603,16 @@ def _generate_page_from_ocr(ocr_regions, page_num, page_width=612, page_height=7
         # --- Image region ---
         if label == "image":
             img_el = etree.SubElement(page_el, "image")
-            # Use OCR index to construct path
-            idx = region.get("index", img_counter)
-            src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{idx}.jpg"
+            if img_queue:
+                # Use next available file, make path relative to workspace
+                abs_path = img_queue.pop(0)
+                src = os.path.relpath(abs_path, workspace) if workspace else abs_path
+            else:
+                src = "PLACEHOLDER"
             img_el.set("src", src)
             if bbox:
                 img_el.set("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}")
             img_el.set("page-width-pts", str(page_width))
-            img_counter += 1
             continue
 
         # --- Text region ---
@@ -743,7 +751,7 @@ def merge_page(workspace, page_num, ocr_data):
         ocr_regions = ocr_data[page_idx] if page_idx < len(ocr_data) else []
         if ocr_regions:
             print(f"  Page {page_num}: no VLM XML — generating from OCR ({len(ocr_regions)} regions)")
-            page_el = _generate_page_from_ocr(ocr_regions, page_num)
+            page_el = _generate_page_from_ocr(ocr_regions, page_num, workspace=workspace)
             return etree.tostring(page_el, encoding="unicode", pretty_print=True)
         return None
 
@@ -764,6 +772,14 @@ def merge_page(workspace, page_num, ocr_data):
     # Step 1: Replace text in headings/paragraphs
     replaced, total, unmatched = match_and_replace_text(page_el, ocr_regions, page_num)
     print(f"  Page {page_num}: replaced {replaced}/{total} text elements")
+
+    # Quality gate: if VLM match rate is very low, OCR-only page is likely better
+    # (VLM structure is too broken to be useful as scaffold)
+    ocr_text_regions = [r for r in ocr_regions if r and r.get("label") != "image"]
+    if total > 0 and replaced / total < 0.3 and len(ocr_text_regions) >= 2:
+        print(f"  Page {page_num}: match rate {replaced/total:.0%} < 30% — switching to OCR-only")
+        page_el = _generate_page_from_ocr(ocr_regions, page_num, workspace=workspace)
+        return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
     # Step 2: Improve table cell text
     for table_el in page_el.findall(".//table"):
