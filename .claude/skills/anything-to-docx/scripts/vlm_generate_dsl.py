@@ -59,7 +59,7 @@ _PROFILE_DEFAULTS = {
         "temperature": 0.6,
     },
     "weak": {
-        "batch_size": 2,      # small context + limited capability
+        "batch_size": 1,      # one page at a time to ensure complete coverage
         "max_tokens": 131072,  # qwen3.5 supports 128k output
         "temperature": 0.6,    # qwen3.5 35b-a3b needs 0.6 for quality output
     },
