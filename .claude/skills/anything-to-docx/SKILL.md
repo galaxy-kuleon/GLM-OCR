@@ -69,51 +69,35 @@ echo "Detected route: $ROUTE ($INPUT_KIND)"
 
 ### 0.3 Derive workspace, clean stale data, save variables
 
+Run this block as one bash command. Copy it exactly — do NOT rewrite or chain with `&&`.
+
 ```bash
 mkdir -p "$OUTPUT_DIR"
-
-if [ -d "$INPUT_PATH" ]; then
-  STEM=$(basename "$INPUT_PATH")
-else
-  STEM=$(basename "$INPUT_PATH")
-  STEM="${STEM%.*}"
-fi
-
+STEM=$(basename "$INPUT_PATH")
+STEM="${STEM%.*}"
 WORKSPACE="$OUTPUT_DIR/${STEM}-atd-workspace"
-
-# Clean stale workspace from previous runs
-if [ -d "$WORKSPACE" ]; then
-  echo "Cleaning stale workspace: $WORKSPACE"
-  rm -rf "$WORKSPACE"
-fi
-
+rm -rf "$WORKSPACE"
 mkdir -p "$WORKSPACE"
 SCRIPT_ROOT=".claude/skills"
-
-# Detect VLM model profile (default: weak for local models)
 VLM_PROFILE="${VLM_MODEL_PROFILE:-weak}"
-case "${VLM_MODEL:-}" in
-  *gpt-4*|*claude*|*gemini*|*70b*|*70B*|*72b*|*72B*)
-    VLM_PROFILE="strong"
-    ;;
-esac
-
-# Save all variables for subsequent bash calls
-cat > .atd-env.sh << ENVEOF
-export INPUT_PATH="$INPUT_PATH"
-export ROUTE="$ROUTE"
-export INPUT_KIND="$INPUT_KIND"
-export STEM="$STEM"
-export WORKSPACE="$WORKSPACE"
-export SCRIPT_ROOT="$SCRIPT_ROOT"
-export OUTPUT_DIR="$OUTPUT_DIR"
-export TARGET_LANG="${TARGET_LANG:-}"
-export STYLE_NOTES="${STYLE_NOTES:-}"
-export VLM_PROFILE="$VLM_PROFILE"
-export VLM_MODEL_PROFILE="$VLM_PROFILE"
-ENVEOF
-echo "Variables saved to .atd-env.sh"
+printf '%s\n' \
+  "export INPUT_PATH=\"$INPUT_PATH\"" \
+  "export ROUTE=\"$ROUTE\"" \
+  "export INPUT_KIND=\"$INPUT_KIND\"" \
+  "export STEM=\"$STEM\"" \
+  "export WORKSPACE=\"$WORKSPACE\"" \
+  "export SCRIPT_ROOT=\"$SCRIPT_ROOT\"" \
+  "export OUTPUT_DIR=\"$OUTPUT_DIR\"" \
+  "export TARGET_LANG=\"${TARGET_LANG:-}\"" \
+  "export STYLE_NOTES=\"${STYLE_NOTES:-}\"" \
+  "export VLM_PROFILE=\"$VLM_PROFILE\"" \
+  "export VLM_MODEL_PROFILE=\"$VLM_PROFILE\"" \
+  > .atd-env.sh
+cat .atd-env.sh
 echo "Model profile: $VLM_PROFILE"
+```
+
+**VERIFY**: If `cat .atd-env.sh` does NOT print the variables above, STOP immediately. Do not continue.
 ```
 
 Validate tools and fixed scripts needed for the detected route. Run ONLY the block for your detected ROUTE. Do NOT run the other route's block.
