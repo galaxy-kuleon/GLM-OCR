@@ -60,7 +60,7 @@ _PROFILE_DEFAULTS = {
     },
     "weak": {
         "batch_size": 2,      # small context + limited capability
-        "max_tokens": 32768,   # weak models may not sustain long output
+        "max_tokens": 131072,  # qwen3.5 supports 128k output
         "temperature": 0.6,    # qwen3.5 35b-a3b needs 0.6 for quality output
     },
 }
