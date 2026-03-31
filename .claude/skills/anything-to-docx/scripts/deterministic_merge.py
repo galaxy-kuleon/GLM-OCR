@@ -293,6 +293,11 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
         if label in ("text",) or native in ("doc_title", "paragraph_title",
                                              "text", "vision_footnote",
                                              "figure_title"):
+            # Use native_label as fallback for heading level when ## markers are absent
+            if heading_level == 0 and native == "doc_title":
+                heading_level = 1
+            elif heading_level == 0 and native == "paragraph_title":
+                heading_level = 2
             text_regions.append({
                 "content": content,
                 "native_label": native,
