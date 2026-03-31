@@ -34,18 +34,26 @@ from lxml import etree
 
 
 def _clean_ocr_text(text):
-    """Remove common OCR artifacts from content strings."""
+    """Remove common OCR artifacts from content strings.
+
+    Returns (cleaned_text, heading_level) where heading_level is 0 for
+    non-headings, or 1-6 based on markdown # markers in OCR output.
+    """
     if not text or not isinstance(text, str):
-        return text or ""
+        return (text or ""), 0
     cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*```", "", text)
     cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*\n?\s*```", "", cleaned)
     cleaned = re.sub(r"^```(?:markdown|xml|json|html)?$", "", cleaned, flags=re.MULTILINE)
     cleaned = cleaned.strip()
     if cleaned.startswith("/ ") or cleaned.startswith("\uff0f "):
         cleaned = cleaned[2:]
-    # Remove markdown heading markers from OCR text (structure comes from VLM)
-    cleaned = re.sub(r"^#{1,6}\s+", "", cleaned)
-    return cleaned.strip()
+    # Extract heading level from markdown markers before removing them
+    heading_level = 0
+    m = re.match(r"^(#{1,6})\s+", cleaned)
+    if m:
+        heading_level = len(m.group(1))
+        cleaned = cleaned[m.end():]
+    return cleaned.strip(), heading_level
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +247,17 @@ def collect_text_elements(page_el):
 # ---------------------------------------------------------------------------
 
 
+_HEADING_FONT_SIZES = {1: "18", 2: "14", 3: "12", 4: "11", 5: "11", 6: "10"}
+
+
+def _fix_heading_level(elem, ocr_level):
+    """Correct heading level and font-size using OCR's markdown markers."""
+    elem.set("level", str(ocr_level))
+    target_size = _HEADING_FONT_SIZES.get(ocr_level, "11")
+    for run in elem.findall("run"):
+        run.set("font-size-pt", target_size)
+
+
 def _replace_element_text(elem, new_text):
     """Replace all text in a heading/paragraph element with new_text.
 
@@ -268,7 +287,7 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
     for r in ocr_regions:
         label = r.get("label", "")
         native = r.get("native_label", "")
-        content = _clean_ocr_text(r.get("content", ""))
+        content, heading_level = _clean_ocr_text(r.get("content", ""))
         if not content:
             continue
         if label in ("text",) or native in ("doc_title", "paragraph_title",
@@ -279,6 +298,7 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
                 "native_label": native,
                 "bbox": r.get("bbox_2d", [0, 0, 0, 0]),
                 "index": r.get("index", 0),
+                "heading_level": heading_level,
             })
 
     # Sort OCR text regions by vertical position (top to bottom)
@@ -330,6 +350,10 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
         # Threshold for accepting a match
         if best_idx >= 0 and best_score > 0.25:
             _replace_element_text(ve["element"], text_regions[best_idx]["content"])
+            # Fix heading level from OCR markers (OCR knows ## = h2, etc.)
+            ocr_hlevel = text_regions[best_idx].get("heading_level", 0)
+            if ocr_hlevel > 0 and ve["type"] == "heading":
+                _fix_heading_level(ve["element"], ocr_hlevel)
             consumed.add(best_idx)
             ocr_cursor = best_idx + 1
             replaced += 1
@@ -428,7 +452,7 @@ def _try_replace_table_text(table_el, ocr_regions, page_num):
         ocr_bbox = r.get("bbox_2d", [0, 0, 0, 0])
         iou = compute_bbox_iou(table_bbox, ocr_bbox)
         if iou > 0.01:
-            content = _clean_ocr_text(r.get("content", ""))
+            content, _ = _clean_ocr_text(r.get("content", ""))
             if content:
                 overlapping.append({
                     "content": content,
