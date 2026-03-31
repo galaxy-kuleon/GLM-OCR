@@ -319,11 +319,11 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
     if not vlm_elements or not text_regions:
         return 0, len(vlm_elements)
 
-    # Greedy sequential matching with look-ahead
+    # Greedy sequential matching with symmetric look-around
     consumed = set()
     ocr_cursor = 0
     replaced = 0
-    LOOK_AHEAD = 6  # search window around cursor
+    LOOK_AROUND = 6  # search window in both directions
 
     for ve in vlm_elements:
         vlm_text = ve["text"]
@@ -333,8 +333,8 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
         best_score = 0.0
         best_idx = -1
 
-        search_start = max(0, ocr_cursor - 2)
-        search_end = min(len(text_regions), ocr_cursor + LOOK_AHEAD)
+        search_start = max(0, ocr_cursor - LOOK_AROUND)
+        search_end = min(len(text_regions), ocr_cursor + LOOK_AROUND)
 
         for i in range(search_start, search_end):
             if i in consumed:
@@ -342,6 +342,10 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
 
             ocr_r = text_regions[i]
             base_sim = combined_similarity(vlm_text, ocr_r["content"])
+
+            # Minimum base similarity — prevent bonuses from promoting bad matches
+            if base_sim < 0.2:
+                continue
 
             # Reject matches where text lengths differ wildly (>5x ratio).
             len_vlm = max(len(vlm_text), 1)
