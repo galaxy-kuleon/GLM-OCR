@@ -61,7 +61,7 @@ fi
 echo "Detected route: $ROUTE ($INPUT_KIND)"
 ```
 
-**After running the detection block above, go DIRECTLY to Route A or Route B below. Do NOT read the other route.**
+**After running the detection block above, continue to Step 0.3 and 0.4 below. Do NOT skip ahead to Route A or Route B yet.**
 
 ### 0.3 Derive workspace and validate
 
@@ -80,12 +80,13 @@ mkdir -p "$WORKSPACE"
 SCRIPT_ROOT=".claude/skills"
 ```
 
-Validate tools and fixed scripts needed for the detected route. Run the exact block below for your route.
+Validate tools and fixed scripts needed for the detected route. Run ONLY the block for your detected ROUTE. Do NOT run the other route's block.
 
 **If `ROUTE="A"`:**
 
 ```bash
 command -v uv >/dev/null || { echo "MISSING: uv"; exit 1; }
+test -f "$SCRIPT_ROOT/shared/verify_step.py" || { echo "MISSING: verify_step.py"; exit 1; }
 test -f "$SCRIPT_ROOT/another-pure-pure-docx-translate-to-docx/scripts/extract_docx_texts.py" || { echo "MISSING: extract_docx_texts.py"; exit 1; }
 test -f "$SCRIPT_ROOT/another-pure-pure-docx-translate-to-docx/scripts/apply_docx_translations.py" || { echo "MISSING: apply_docx_translations.py"; exit 1; }
 
@@ -103,6 +104,7 @@ fi
 ```bash
 command -v uv >/dev/null || { echo "MISSING: uv"; exit 1; }
 for script in \
+  "$SCRIPT_ROOT/shared/verify_step.py" \
   "$SCRIPT_ROOT/anything-to-docx/scripts/create_pdf_image_info.py" \
   "$SCRIPT_ROOT/anything-to-docx/scripts/resize_images.py" \
   "$SCRIPT_ROOT/anything-to-docx/scripts/vlm_generate_dsl.py" \
@@ -160,6 +162,8 @@ WORKSPACE=___   STEM=___   SCRIPT_ROOT=.claude/skills
 TARGET_LANG=___ (or empty)
 ```
 
+**NOW go to your detected route: if ROUTE="A" go to "Route A" section. If ROUTE="B" go to "Route B" section. Do NOT read the other route's section.**
+
 ---
 
 ## Route A: DOC / DOCX / Markdown
@@ -168,7 +172,7 @@ Use this route for `.doc`, `.docx`, `.md`, `.markdown` inputs.
 
 ### Route A Checklist
 
-Copy and track:
+Print this checklist now. After each step, reprint it with `[x]` and filled values:
 
 ```
 Route A Progress:
@@ -217,7 +221,7 @@ uv run --with lxml \
 uv run .claude/skills/shared/verify_step.py --step A2a --workspace "$WORKSPACE"
 ```
 
-**A2b: Translate** — follow [Translation Procedure](#translation-procedure) below.
+**A2b: Translate** — go to [Translation Procedure](#translation-procedure) section below and follow T1-T5. When T5 passes, return HERE and continue to A2c.
 
 **A2c: Apply translations:**
 ```bash
@@ -251,7 +255,7 @@ Use this route for `.pdf`, image files, or directories of images.
 
 ### Route B Checklist
 
-Copy and track. Fill in values as you complete each step.
+Print this checklist now. After each step, reprint it with `[x]` and filled values.
 
 ```
 Route B Progress:
@@ -402,7 +406,7 @@ uv run --with requests,Pillow,lxml \
 uv run .claude/skills/shared/verify_step.py --step B3 --workspace "$WORKSPACE"
 ```
 
-**If verify fails:** Re-run the same command once. If it fails again, STOP and report.
+**If verify fails:** Re-run the B3 command ONCE (maximum 1 retry). If the retry also fails, print `B3 FAILED — VLM generation unsuccessful after 2 attempts` and STOP. Do NOT proceed to B4.
 
 ### B4: Merge
 
@@ -440,7 +444,7 @@ uv run .claude/skills/shared/verify_step.py --step B5 --workspace "$WORKSPACE"
 
 ### B6: Visual Verification — default SKIP
 
-Print `B6 SKIP` and continue to B7. Only if the user explicitly requested visual QA, read [route-b-reference.md](route-b-reference.md) section "B6 Visual Verification".
+Output `B6 SKIP` and go directly to B7. Do NOT read route-b-reference.md unless the user explicitly asked for visual QA.
 
 ### B7: Translation (if `TARGET_LANG` is set)
 
@@ -459,7 +463,7 @@ uv run --with lxml \
 uv run .claude/skills/shared/verify_step.py --step B7a --workspace "$WORKSPACE"
 ```
 
-**B7b: Translate** — follow [Translation Procedure](#translation-procedure) below.
+**B7b: Translate** — go to [Translation Procedure](#translation-procedure) section below and follow T1-T5. When T5 passes, return HERE and continue to B7c.
 
 **B7c: Apply translations to XML DSL:**
 ```bash

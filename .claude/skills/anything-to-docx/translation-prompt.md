@@ -122,7 +122,16 @@ Batch requirements:
 5. Validate the batch file immediately:
 
 ```bash
-python3 -c "import json; src=json.load(open('$WORKSPACE/batch-input-$BATCH_NO.json', encoding='utf-8')); out=json.load(open('$WORKSPACE/batch-$BATCH_NO.json', encoding='utf-8')); actual=len(out['translations']); expected=len(src); print(f'Batch $BATCH_NO validation: {actual}/{expected}'); assert actual == expected"
+python3 -c "
+import json, sys
+src = json.load(open('$WORKSPACE/batch-input-$BATCH_NO.json', encoding='utf-8'))
+out = json.load(open('$WORKSPACE/batch-$BATCH_NO.json', encoding='utf-8'))
+# Accept any format: {'translations': [...]}, {'segments': [...]}, or bare [...]
+items = out if isinstance(out, list) else out.get('translations', out.get('segments', []))
+actual, expected = len(items), len(src)
+print(f'Batch $BATCH_NO validation: {actual}/{expected}')
+assert actual == expected, f'Count mismatch: got {actual}, expected {expected}'
+"
 ```
 
 6. Print progress: `Batch M/TOTAL_BATCHES complete`.
