@@ -208,6 +208,9 @@ def collect_text_elements(page_el):
     for elem in page_el:
         tag = elem.tag
         if tag in ("heading", "paragraph"):
+            # Skip header/footer elements — their text comes from VLM, not OCR
+            if elem.get("style") in ("footer", "header"):
+                continue
             text = _get_element_text(elem)
             results.append({
                 "element": elem,
@@ -338,7 +341,21 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
                 continue
 
             ocr_r = text_regions[i]
-            sim = combined_similarity(vlm_text, ocr_r["content"])
+            base_sim = combined_similarity(vlm_text, ocr_r["content"])
+
+            # Reject matches where text lengths differ wildly (>5x ratio).
+            len_vlm = max(len(vlm_text), 1)
+            len_ocr = max(len(ocr_r["content"]), 1)
+            length_ratio = max(len_vlm, len_ocr) / min(len_vlm, len_ocr)
+            if length_ratio > 5 and base_sim < 0.5:
+                continue
+
+            # OCR heading regions must match VLM heading elements (not paragraphs)
+            ocr_hlevel = ocr_r.get("heading_level", 0)
+            if ocr_hlevel > 0 and ve["type"] != "heading":
+                continue
+
+            sim = base_sim
 
             # Label matching bonus
             if _label_matches_type(ocr_r["native_label"], ve["type"]):
@@ -588,6 +605,42 @@ def _clean_vlm_xml_artifacts(page_el):
                 elem.text = cleaned if cleaned else None
 
 
+def _dedup_consecutive_elements(page_el):
+    """Remove consecutive duplicate heading/paragraph elements.
+
+    Weak VLMs sometimes repeat the same content. If two nearby text elements
+    have >80% text similarity, remove the less-styled one (prefer heading
+    over paragraph, larger font over smaller).
+    """
+    removed = 0
+    children = list(page_el)
+    prev_elem = None
+    prev_text = None
+    for child in children:
+        if child.tag not in ("heading", "paragraph"):
+            prev_elem = None
+            prev_text = None
+            continue
+        text = _get_element_text(child)
+        if prev_text and text:
+            sim = combined_similarity(prev_text, text)
+            if sim > 0.8:
+                # Remove the less-styled duplicate: prefer heading over paragraph
+                if prev_elem.tag == "heading" and child.tag == "paragraph":
+                    page_el.remove(child)
+                elif child.tag == "heading" and prev_elem.tag == "paragraph":
+                    page_el.remove(prev_elem)
+                    prev_elem = child
+                    prev_text = text
+                else:
+                    page_el.remove(child)
+                removed += 1
+                continue
+        prev_elem = child
+        prev_text = text
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Per-page merge
 # ---------------------------------------------------------------------------
@@ -638,7 +691,12 @@ def merge_page(workspace, page_num, ocr_data):
     if img_count:
         print(f"  Page {page_num}: resolved {img_count} image paths")
 
-    # Step 4: Gap filling — append OCR regions VLM missed
+    # Step 4: Dedup — remove consecutive duplicate text after OCR replacement
+    deduped = _dedup_consecutive_elements(page_el)
+    if deduped:
+        print(f"  Page {page_num}: removed {deduped} duplicate elements")
+
+    # Step 5: Gap filling — append OCR regions VLM missed
     if unmatched:
         gap_count = _append_gap_elements(page_el, unmatched)
         if gap_count:
