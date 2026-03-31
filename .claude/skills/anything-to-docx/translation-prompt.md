@@ -36,6 +36,7 @@ Examples:
 ## T1: Read inputs
 
 ```bash
+source .atd-env.sh
 TOTAL=$(python3 -c "import json; print(json.load(open('$WORKSPACE/texts.json', encoding='utf-8'))['total_segments'])")
 echo "Total segments to translate: $TOTAL"
 
@@ -57,6 +58,7 @@ Variable sources:
 Use `BATCH_SIZE=30`.
 
 ```bash
+source .atd-env.sh
 BATCH_SIZE=30
 TOTAL_BATCHES=$(python3 -c "total=int('$TOTAL'); print((total + 29) // 30)")
 echo "Total batches: $TOTAL_BATCHES"
@@ -71,7 +73,7 @@ For each batch number `M` from `1` to `TOTAL_BATCHES`:
 1. Extract the batch input file:
 
 ```bash
-export WORKSPACE
+source .atd-env.sh
 export BATCH_NO="$M"
 python3 << 'PYEOF'
 import json, os
@@ -122,6 +124,7 @@ Batch requirements:
 5. Validate the batch file immediately:
 
 ```bash
+source .atd-env.sh
 python3 -c "
 import json, sys
 src = json.load(open('$WORKSPACE/batch-input-$BATCH_NO.json', encoding='utf-8'))
@@ -145,6 +148,7 @@ batch-N.json files, handles any variant format (canonical, segments, bare array,
 normalizes every entry, merges them, validates against texts.json, and writes translations.json.
 
 ```bash
+source .atd-env.sh
 uv run .claude/skills/anything-to-docx/scripts/normalize_translations.py \
   --workspace "$WORKSPACE"
 ```
@@ -163,7 +167,7 @@ This writes `$WORKSPACE/translations.json` in canonical format. The script:
 Run this exact check:
 
 ```bash
-export WORKSPACE
+source .atd-env.sh
 python3 << 'PYEOF'
 import json, os, sys
 
@@ -207,7 +211,7 @@ If T5 fails:
 4. Merge the recovery batch into `translations.json` with this exact command:
 
 ```bash
-export WORKSPACE
+source .atd-env.sh
 python3 << 'PYEOF'
 import json, os
 

@@ -16,6 +16,10 @@ allowed-tools:
 
 Convert any document to high-fidelity editable DOCX. Optional translation preserving layout/style.
 
+**CRITICAL — Variable Persistence**: Shell variables are lost between separate bash calls. Step 0 saves all variables to `.atd-env.sh`. Every bash block after Step 0 MUST begin with `source .atd-env.sh` on its first line. If you combine multiple blocks into one bash call, one `source` at the top is enough.
+
+**CRITICAL — No Skipping**: ALWAYS run every step in sequential order. Do NOT skip steps even if the workspace already contains files from a previous run. Do NOT jump to the final output step.
+
 ## Step 0: Parse Arguments, Detect Route, Fail Fast, Build Glossary
 
 ### 0.1 Parse `$ARGUMENTS`
@@ -63,7 +67,7 @@ echo "Detected route: $ROUTE ($INPUT_KIND)"
 
 **After running the detection block above, continue to Step 0.3 and 0.4 below. Do NOT skip ahead to Route A or Route B yet.**
 
-### 0.3 Derive workspace and validate
+### 0.3 Derive workspace, clean stale data, save variables
 
 ```bash
 mkdir -p "$OUTPUT_DIR"
@@ -76,8 +80,29 @@ else
 fi
 
 WORKSPACE="$OUTPUT_DIR/${STEM}-atd-workspace"
+
+# Clean stale workspace from previous runs
+if [ -d "$WORKSPACE" ]; then
+  echo "Cleaning stale workspace: $WORKSPACE"
+  rm -rf "$WORKSPACE"
+fi
+
 mkdir -p "$WORKSPACE"
 SCRIPT_ROOT=".claude/skills"
+
+# Save all variables for subsequent bash calls
+cat > .atd-env.sh << ENVEOF
+export INPUT_PATH="$INPUT_PATH"
+export ROUTE="$ROUTE"
+export INPUT_KIND="$INPUT_KIND"
+export STEM="$STEM"
+export WORKSPACE="$WORKSPACE"
+export SCRIPT_ROOT="$SCRIPT_ROOT"
+export OUTPUT_DIR="$OUTPUT_DIR"
+export TARGET_LANG="${TARGET_LANG:-}"
+export STYLE_NOTES="${STYLE_NOTES:-}"
+ENVEOF
+echo "Variables saved to .atd-env.sh"
 ```
 
 Validate tools and fixed scripts needed for the detected route. Run ONLY the block for your detected ROUTE. Do NOT run the other route's block.
@@ -85,6 +110,7 @@ Validate tools and fixed scripts needed for the detected route. Run ONLY the blo
 **If `ROUTE="A"`:**
 
 ```bash
+source .atd-env.sh
 command -v uv >/dev/null || { echo "MISSING: uv"; exit 1; }
 test -f "$SCRIPT_ROOT/shared/verify_step.py" || { echo "MISSING: verify_step.py"; exit 1; }
 test -f "$SCRIPT_ROOT/another-pure-pure-docx-translate-to-docx/scripts/extract_docx_texts.py" || { echo "MISSING: extract_docx_texts.py"; exit 1; }
@@ -102,6 +128,7 @@ fi
 **If `ROUTE="B"`:**
 
 ```bash
+source .atd-env.sh
 command -v uv >/dev/null || { echo "MISSING: uv"; exit 1; }
 for script in \
   "$SCRIPT_ROOT/shared/verify_step.py" \
@@ -133,7 +160,7 @@ Abort immediately if any check fails.
 **If `TARGET_LANG` is empty, skip this step entirely.**
 
 ```bash
-export GLOSSARY_FILE TERM_PAIRS WORKSPACE
+source .atd-env.sh
 python3 << 'PYEOF'
 import json, os, sys
 glossary = {}
@@ -154,12 +181,13 @@ PYEOF
 
 ### State Summary
 
-After completing Step 0, confirm these variables are set:
+After completing Step 0, verify variables are saved:
 
-```
-INPUT_PATH=___  ROUTE=___  INPUT_KIND=___
-WORKSPACE=___   STEM=___   SCRIPT_ROOT=.claude/skills
-TARGET_LANG=___ (or empty)
+```bash
+source .atd-env.sh
+echo "INPUT_PATH=$INPUT_PATH  ROUTE=$ROUTE  INPUT_KIND=$INPUT_KIND"
+echo "WORKSPACE=$WORKSPACE  STEM=$STEM  SCRIPT_ROOT=$SCRIPT_ROOT"
+echo "TARGET_LANG=${TARGET_LANG:-<empty>}"
 ```
 
 **NOW go to your detected route: if ROUTE="A" go to "Route A" section. If ROUTE="B" go to "Route B" section. Do NOT read the other route's section.**
@@ -176,32 +204,39 @@ Print this checklist now. After each step, reprint it with `[x]` and filled valu
 
 ```
 Route A Progress:
-- [ ] A1: Convert to DOCX → DOCX_PATH=___
+- [ ] A1: Convert to DOCX -> DOCX_PATH=___
 - [ ] A2: Translation (if --lang set, else SKIP)
-- [ ] A3: Final output → path=___
+- [ ] A3: Final output -> path=___
 ```
 
 ### A1: Convert to DOCX (if needed)
 
 **If input is `.doc`:**
 ```bash
+source .atd-env.sh
 soffice --headless --convert-to docx --outdir "$WORKSPACE" "$INPUT_PATH"
 DOCX_PATH="$WORKSPACE/$(basename "$INPUT_PATH" .doc).docx"
+echo "export DOCX_PATH=\"$DOCX_PATH\"" >> .atd-env.sh
 ```
 
 **If input is `.md` or `.markdown`:**
 ```bash
+source .atd-env.sh
 pandoc "$INPUT_PATH" -o "$WORKSPACE/${STEM}.docx"
 DOCX_PATH="$WORKSPACE/${STEM}.docx"
+echo "export DOCX_PATH=\"$DOCX_PATH\"" >> .atd-env.sh
 ```
 
 **If input is `.docx`:**
 ```bash
+source .atd-env.sh
 DOCX_PATH="$INPUT_PATH"
+echo "export DOCX_PATH=\"$DOCX_PATH\"" >> .atd-env.sh
 ```
 
 **Verify A1:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step A1 --workspace "$WORKSPACE" --docx-path "$DOCX_PATH"
 ```
 
@@ -211,6 +246,7 @@ uv run .claude/skills/shared/verify_step.py --step A1 --workspace "$WORKSPACE" -
 
 **A2a: Extract translatable text:**
 ```bash
+source .atd-env.sh
 uv run --with lxml \
   .claude/skills/another-pure-pure-docx-translate-to-docx/scripts/extract_docx_texts.py \
   --input "$DOCX_PATH" --output "$WORKSPACE/texts.json"
@@ -218,6 +254,7 @@ uv run --with lxml \
 
 **Verify A2a:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step A2a --workspace "$WORKSPACE"
 ```
 
@@ -225,6 +262,7 @@ uv run .claude/skills/shared/verify_step.py --step A2a --workspace "$WORKSPACE"
 
 **A2c: Apply translations:**
 ```bash
+source .atd-env.sh
 uv run --with lxml \
   .claude/skills/another-pure-pure-docx-translate-to-docx/scripts/apply_docx_translations.py \
   --input "$DOCX_PATH" --translations "$WORKSPACE/translations.json" \
@@ -233,12 +271,14 @@ uv run --with lxml \
 
 **Verify A2c:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step A2c --workspace "$WORKSPACE"
 ```
 
 ### A3: Final Output
 
 ```bash
+source .atd-env.sh
 if [ -f "$WORKSPACE/translated-output.docx" ]; then
   cp "$WORKSPACE/translated-output.docx" "$WORKSPACE/final-output.docx"
 else
@@ -249,9 +289,11 @@ ls -lh "$WORKSPACE/final-output.docx"
 
 Report: `$WORKSPACE/final-output.docx`. **Route A done. STOP here.**
 
-## Route B: PDF / Image → VLM+OCR Pipeline
+## Route B: PDF / Image -> VLM+OCR Pipeline
 
 Use this route for `.pdf`, image files, or directories of images.
+
+**ALWAYS run every step B0 through B8 in order. Do NOT skip steps. Do NOT reuse data from previous runs.**
 
 ### Route B Checklist
 
@@ -275,13 +317,16 @@ Route B Progress:
 Run this exact block. Do not modify.
 
 ```bash
-VLM_PROFILE="${VLM_MODEL_PROFILE:-strong}"
+source .atd-env.sh
+VLM_PROFILE="${VLM_MODEL_PROFILE:-weak}"
 case "${VLM_MODEL:-}" in
-  *35b*|*35B*|*7b*|*7B*|*8b*|*8B*|*3b*|*3B*|*a3b*|*A3B*)
-    VLM_PROFILE="weak"
+  *gpt-4*|*claude*|*gemini*|*70b*|*70B*|*72b*|*72B*)
+    VLM_PROFILE="strong"
     ;;
 esac
 export VLM_MODEL_PROFILE="$VLM_PROFILE"
+echo "export VLM_PROFILE=\"$VLM_PROFILE\"" >> .atd-env.sh
+echo "export VLM_MODEL_PROFILE=\"$VLM_PROFILE\"" >> .atd-env.sh
 echo "Model profile: $VLM_PROFILE"
 ```
 
@@ -290,10 +335,11 @@ echo "Model profile: $VLM_PROFILE"
 **If input is a PDF:**
 
 ```bash
+source .atd-env.sh
 mkdir -p "$WORKSPACE/input-images"
 pdftocairo -png -r 220 "$INPUT_PATH" "$WORKSPACE/input-images/page"
 
-# Normalize zero-padded filenames (page-01.png → page-1.png)
+# Normalize zero-padded filenames (page-01.png -> page-1.png)
 for f in "$WORKSPACE/input-images"/page-*.png; do
   base=$(basename "$f" .png)
   num=$(echo "$base" | sed 's/page-0*//')
@@ -307,12 +353,15 @@ pdftotext "$INPUT_PATH" "$WORKSPACE/pdf-fulltext.txt"
 
 uv run .claude/skills/anything-to-docx/scripts/create_pdf_image_info.py \
   --workspace "$WORKSPACE" --pdf-info "$WORKSPACE/pdf-info.txt" --dpi 220
+
+echo "export PAGE_COUNT=\"$PAGE_COUNT\"" >> .atd-env.sh
+echo "Page count: $PAGE_COUNT"
 ```
 
 **If input is image file(s) or a directory:**
 
 ```bash
-export INPUT_PATH WORKSPACE
+source .atd-env.sh
 python3 << 'PYEOF'
 import json, os, re, sys
 
@@ -356,10 +405,13 @@ uv run --with Pillow \
   --images "$IMAGES" --workspace "$WORKSPACE"
 
 PAGE_COUNT=$(python3 -c "import json; print(json.load(open('$WORKSPACE/image-info.json'))['page_count'])")
+echo "export PAGE_COUNT=\"$PAGE_COUNT\"" >> .atd-env.sh
+echo "Page count: $PAGE_COUNT"
 ```
 
 **Verify B1:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B1 --workspace "$WORKSPACE"
 ```
 
@@ -367,12 +419,14 @@ uv run .claude/skills/shared/verify_step.py --step B1 --workspace "$WORKSPACE"
 
 **If input was a PDF:**
 ```bash
+source .atd-env.sh
 cp "$INPUT_PATH" "$WORKSPACE/input.pdf"
 uv run glmocr parse "$WORKSPACE/input.pdf" --output "$WORKSPACE/ocr-output/"
 ```
 
 **If input was image(s):**
 ```bash
+source .atd-env.sh
 for N in $(seq 1 $PAGE_COUNT); do
   mkdir -p "$WORKSPACE/ocr-input/page-$N"
   cp "$WORKSPACE/input-images/page-$N.png" "$WORKSPACE/ocr-input/page-$N/input.png"
@@ -388,6 +442,7 @@ uv run .claude/skills/image-to-docx/scripts/consolidate_ocr_results.py \
 
 **Verify B2:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B2 --workspace "$WORKSPACE"
 ```
 
@@ -396,6 +451,7 @@ uv run .claude/skills/shared/verify_step.py --step B2 --workspace "$WORKSPACE"
 Run this exact command. The script handles batch size and prompt selection based on `$VLM_PROFILE`.
 
 ```bash
+source .atd-env.sh
 uv run --with requests,Pillow,lxml \
   .claude/skills/anything-to-docx/scripts/vlm_generate_dsl.py \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT" --model-profile "$VLM_PROFILE"
@@ -403,16 +459,18 @@ uv run --with requests,Pillow,lxml \
 
 **Verify B3:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B3 --workspace "$WORKSPACE"
 ```
 
-**If verify fails:** Re-run the B3 command ONCE (maximum 1 retry). If the retry also fails, print `B3 FAILED — VLM generation unsuccessful after 2 attempts` and STOP. Do NOT proceed to B4.
+**If verify fails:** Re-run the B3 command ONCE (maximum 1 retry). If the retry also fails, print `B3 FAILED -- VLM generation unsuccessful after 2 attempts` and STOP. Do NOT proceed to B4.
 
 ### B4: Merge
 
 Run this exact block. The shell selects the right merge strategy based on `$VLM_PROFILE`.
 
 ```bash
+source .atd-env.sh
 if [ "$VLM_PROFILE" = "weak" ]; then
   uv run --with lxml \
     .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
@@ -426,12 +484,14 @@ fi
 
 **Verify B4:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B4 --workspace "$WORKSPACE"
 ```
 
 ### B5: DSL to DOCX
 
 ```bash
+source .atd-env.sh
 uv run --with python-docx,lxml,Pillow \
   .claude/skills/pdf-to-docx/scripts/dsl_to_docx.py \
   --workspace "$WORKSPACE" --output "$WORKSPACE/output.docx"
@@ -439,10 +499,11 @@ uv run --with python-docx,lxml,Pillow \
 
 **Verify B5:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B5 --workspace "$WORKSPACE"
 ```
 
-### B6: Visual Verification — default SKIP
+### B6: Visual Verification -- default SKIP
 
 Output `B6 SKIP` and go directly to B7. Do NOT read route-b-reference.md unless the user explicitly asked for visual QA.
 
@@ -452,6 +513,7 @@ Output `B6 SKIP` and go directly to B7. Do NOT read route-b-reference.md unless 
 
 **B7a: Extract translatable text:**
 ```bash
+source .atd-env.sh
 uv run --with lxml \
   .claude/skills/anything-to-docx/scripts/extract_dsl_texts.py \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT" \
@@ -460,13 +522,15 @@ uv run --with lxml \
 
 **Verify B7a:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B7a --workspace "$WORKSPACE"
 ```
 
-**B7b: Translate** — go to [Translation Procedure](#translation-procedure) section below and follow T1-T5. When T5 passes, return HERE and continue to B7c.
+**B7b: Translate** -- go to [Translation Procedure](#translation-procedure) section below and follow T1-T5. When T5 passes, return HERE and continue to B7c.
 
 **B7c: Apply translations to XML DSL:**
 ```bash
+source .atd-env.sh
 uv run --with lxml \
   .claude/skills/anything-to-docx/scripts/apply_dsl_translations.py \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT" \
@@ -476,6 +540,7 @@ uv run --with lxml \
 
 **B7d: Generate translated DOCX:**
 ```bash
+source .atd-env.sh
 uv run --with python-docx,lxml,Pillow \
   .claude/skills/pdf-to-docx/scripts/dsl_to_docx.py \
   --workspace "$WORKSPACE" --dsl-dir "dsl-translated" \
@@ -484,12 +549,14 @@ uv run --with python-docx,lxml,Pillow \
 
 **Verify B7d:**
 ```bash
+source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B7d --workspace "$WORKSPACE"
 ```
 
 ### B8: Final Output
 
 ```bash
+source .atd-env.sh
 if [ -f "$WORKSPACE/translated-output.docx" ]; then
   cp "$WORKSPACE/translated-output.docx" "$WORKSPACE/final-output.docx"
 else
