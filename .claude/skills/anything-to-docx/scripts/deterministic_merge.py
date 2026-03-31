@@ -166,6 +166,55 @@ def _parse_bbox_attr(bbox_str):
     return parts if len(parts) == 4 else None
 
 
+def _dedup_image_regions(image_regions):
+    """Remove superset image regions that contain other smaller regions.
+
+    When OCR detects both individual signature boxes AND a large region
+    covering all of them, keep the smaller specific regions and drop the
+    superset. Uses containment ratio: if >70% of a smaller region fits
+    inside a larger one, the larger is considered a superset.
+
+    Returns filtered list of image regions (preserves order).
+    """
+    if len(image_regions) <= 1:
+        return image_regions
+
+    def _area(bb):
+        return max(0, bb[2] - bb[0]) * max(0, bb[3] - bb[1])
+
+    def _containment(inner, outer):
+        """Fraction of inner bbox area that falls inside outer bbox."""
+        ix1 = max(inner[0], outer[0])
+        iy1 = max(inner[1], outer[1])
+        ix2 = min(inner[2], outer[2])
+        iy2 = min(inner[3], outer[3])
+        if ix2 <= ix1 or iy2 <= iy1:
+            return 0.0
+        inter = (ix2 - ix1) * (iy2 - iy1)
+        inner_area = _area(inner)
+        return inter / inner_area if inner_area > 0 else 0.0
+
+    # Tag each region with its bbox and area
+    tagged = []
+    for r in image_regions:
+        bb = r.get("bbox_2d", [0, 0, 0, 0])
+        tagged.append((r, bb, _area(bb)))
+
+    # A region is a "superset" if ≥2 other regions are ≥70% contained in it
+    superset_indices = set()
+    for i, (_, bb_i, area_i) in enumerate(tagged):
+        contained_count = 0
+        for j, (_, bb_j, area_j) in enumerate(tagged):
+            if i == j:
+                continue
+            if area_j < area_i and _containment(bb_j, bb_i) > 0.7:
+                contained_count += 1
+        if contained_count >= 2:
+            superset_indices.add(i)
+
+    return [r for i, (r, _, _) in enumerate(tagged) if i not in superset_indices]
+
+
 # ---------------------------------------------------------------------------
 # VLM XML element collection
 # ---------------------------------------------------------------------------
@@ -583,6 +632,15 @@ def _generate_page_from_ocr(ocr_regions, page_num, workspace=None, page_width=61
     page_el.set("font-cjk", "SimSun")
 
     page_idx = page_num - 1  # 0-based for image path construction
+
+    # Dedup overlapping image regions (e.g., OCR detects both individual
+    # signature boxes AND a superset region covering all of them)
+    image_regions = [r for r in ocr_regions if r and r.get("label") == "image"]
+    deduped_images = _dedup_image_regions(image_regions)
+    if len(deduped_images) < len(image_regions):
+        # Replace ocr_regions with deduped version
+        dropped = set(id(r) for r in image_regions) - set(id(r) for r in deduped_images)
+        ocr_regions = [r for r in ocr_regions if r is None or r.get("label") != "image" or id(r) not in dropped]
 
     # Pre-discover actual image files for this page (glob is more reliable
     # than computing from JSON index, since glm-ocr uses its own numbering)
