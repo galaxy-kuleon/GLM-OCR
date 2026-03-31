@@ -83,7 +83,7 @@ VLM scripts read these env vars (all optional, have sensible defaults):
 |---|---|---|
 | `VLM_MODEL_PROFILE` | `strong` | `strong` or `weak` — controls prompts, batch sizes, merge strategy |
 | `VLM_ENDPOINT` | `http://localhost:1234/v1/chat/completions` | OpenAI-compatible VLM API endpoint |
-| `VLM_MODEL` | `qwen3.5-122b-a10b` | Model name sent in API request |
+| `VLM_MODEL` | `qwen3.5-35b-a3b` | Model name sent in API request |
 | `VLM_API_KEY` | `lm-studio` | API key (LMStudio ignores this) |
 | `VLM_TIMEOUT` | `600` | Request timeout in seconds |
 | `VLM_MAX_TOKENS` | profile-dependent | Max output tokens (strong: 131072, weak: 32768) |

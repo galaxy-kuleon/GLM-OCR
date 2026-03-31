@@ -35,8 +35,8 @@ from PIL import Image
 # LMStudio local endpoint; override with VLM_ENDPOINT env var for remote/cloud VLM
 VLM_ENDPOINT = os.environ.get("VLM_ENDPOINT", "http://localhost:1234/v1/chat/completions")
 
-# Qwen3.5-122B-A10B: native multimodal VLM with 256K context, 65K output
-VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.5-122b-a10b")
+# Default to qwen3.5-35b-a3b (local); override with VLM_MODEL env var
+VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.5-35b-a3b")
 
 # LMStudio ignores API keys, but OpenAI-compatible API requires the header
 VLM_API_KEY = os.environ.get("VLM_API_KEY", "lm-studio")

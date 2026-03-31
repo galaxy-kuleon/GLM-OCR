@@ -98,7 +98,6 @@ echo "Model profile: $VLM_PROFILE"
 ```
 
 **VERIFY**: If `cat .atd-env.sh` does NOT print the variables above, STOP immediately. Do not continue.
-```
 
 Validate tools and fixed scripts needed for the detected route. Run ONLY the block for your detected ROUTE. Do NOT run the other route's block.
 
@@ -453,19 +452,22 @@ uv run .claude/skills/shared/verify_step.py --step B3 --workspace "$WORKSPACE"
 
 ### B4: Merge
 
-Run this exact block. The shell selects the right merge strategy based on `$VLM_PROFILE`.
+Check `VLM_PROFILE` in `.atd-env.sh`. Run ONLY the block matching your profile.
 
+**If `VLM_PROFILE="weak"`** (this is the default for local models):
 ```bash
 source .atd-env.sh
-if [ "$VLM_PROFILE" = "weak" ]; then
-  uv run --with lxml \
-    .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
-    --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
-else
-  uv run --with requests,Pillow,lxml \
-    .claude/skills/anything-to-docx/scripts/vlm_merge_dsl.py \
-    --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
-fi
+uv run --with lxml \
+  .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
+  --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
+```
+
+**If `VLM_PROFILE="strong"`:**
+```bash
+source .atd-env.sh
+uv run --with requests,Pillow,lxml \
+  .claude/skills/anything-to-docx/scripts/vlm_merge_dsl.py \
+  --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
 ```
 
 **Verify B4:**
@@ -512,7 +514,32 @@ source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B7a --workspace "$WORKSPACE"
 ```
 
-**B7b: Translate** -- go to [Translation Procedure](#translation-procedure) section below and follow T1-T5. When T5 passes, return HERE and continue to B7c.
+**B7b: Translate** -- STOP here. Open and read [translation-prompt.md](translation-prompt.md). Follow steps T1 through T5 EXACTLY. You MUST translate every segment yourself into the target language. Do NOT use the Write tool to create translations.json directly. Do NOT copy source text as translated text. The translation-prompt.md file contains the ONLY correct procedure.
+
+When T5 passes, return HERE and continue to B7c.
+
+**B7b-verify: Check translations are real (not copied source text):**
+```bash
+source .atd-env.sh
+python3 -c "
+import json
+texts = json.load(open('$WORKSPACE/texts.json'))
+trans = json.load(open('$WORKSPACE/translations.json'))
+items = trans.get('translations', [])
+if not items:
+    print('FAIL: translations.json is empty'); exit(1)
+same = sum(1 for t, s in zip(items, texts['segments']) if t.get('translated_text','') == s.get('text',''))
+pct = same / len(items) * 100 if items else 100
+print(f'Identity check: {same}/{len(items)} translations identical to source ({pct:.0f}%)')
+if pct > 50:
+    print('FAIL: >50% of translations are identical to source. You did not actually translate.')
+    print('FIX: Go back to B7b. Read translation-prompt.md. Translate every segment into TARGET_LANG.')
+    exit(1)
+print('PASS: translations look real')
+"
+```
+
+**If B7b-verify fails, go back to B7b and redo the translation. Do NOT proceed to B7c.**
 
 **B7c: Apply translations to XML DSL:**
 ```bash
