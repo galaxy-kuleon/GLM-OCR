@@ -425,6 +425,8 @@ uv run .claude/skills/shared/verify_step.py --step B2 --workspace "$WORKSPACE"
 
 ### B3: VLM Generate XML DSL
 
+**IMPORTANT: This command is SLOW** (1-5 minutes depending on page count). Set your bash timeout to at least 600 seconds. Do NOT interrupt or retry early.
+
 Run this exact command. The script handles batch size and prompt selection based on `$VLM_PROFILE`.
 
 ```bash
