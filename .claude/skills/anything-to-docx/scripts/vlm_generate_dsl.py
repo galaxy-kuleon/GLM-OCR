@@ -230,11 +230,25 @@ def build_page_dimensions_text(image_info, start, end):
 def build_user_prompt(start, end, dimensions_text):
     """Build the user prompt text for a batch."""
     count = end - start + 1
+    layout_hint = ""
+    if VLM_MODEL_PROFILE == "weak":
+        layout_hint = (
+            "\nFor each page you receive TWO images:\n"
+            "1. The original page image (for reading text content)\n"
+            "2. A layout analysis image with colored boxes showing detected regions:\n"
+            "   - doc_title (red) = heading level 1\n"
+            "   - paragraph_title (green) = heading level 2\n"
+            "   - table (blue) = table element\n"
+            "   - image (yellow) = image element\n"
+            "   - header/footer (pink/gray) = page header/footer\n"
+            "   - text = paragraph element\n"
+            "Use the layout image to determine element types and reading order.\n"
+        )
     return (
         f"Analyze these {count} document page images (pages {start}-{end}).\n"
         f"For each page, produce an XML <page> element following the schema exactly.\n"
         f"Wrap all pages in a <pages> root element.\n"
-        f"\n"
+        f"{layout_hint}\n"
         f"Page dimensions:\n"
         f"{dimensions_text}"
     )
@@ -245,9 +259,13 @@ def build_image_content_items(workspace, start, end):
 
     Returns a list of dicts suitable for the 'content' array in the
     OpenAI-compatible messages format.
+
+    For weak profiles, also includes layout visualization images from
+    glm-ocr (colored bounding boxes with region labels) when available.
     """
     items = []
     for n in range(start, end + 1):
+        # Raw page image
         image_path = os.path.join(workspace, "input-images", f"page-{n}.png")
         b64 = encode_image_to_base64(image_path)
         items.append({
@@ -256,6 +274,22 @@ def build_image_content_items(workspace, start, end):
                 "url": f"data:image/png;base64,{b64}",
             },
         })
+
+        # Layout visualization (weak profile only — helps model see structure)
+        if VLM_MODEL_PROFILE == "weak":
+            page_idx = n - 1  # layout_vis uses 0-based indexing
+            layout_path = os.path.join(
+                workspace, "ocr-output", "input", "layout_vis",
+                f"input_page{page_idx}.jpg"
+            )
+            if os.path.exists(layout_path):
+                b64_layout = encode_image_to_base64(layout_path)
+                items.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{b64_layout}",
+                    },
+                })
     return items
 
 
