@@ -33,9 +33,9 @@ TERM_PAIRS  = --term value or empty (optional)
 OUTPUT_DIR  = --output value or ./output (optional)
 ```
 
-### 0.2 Validate input path and detect route
+### 0.2+0.3 Detect route, derive workspace, save variables
 
-Run this exact block. Do not modify.
+Run this SINGLE block. It detects route AND saves all variables. Do NOT split into multiple bash calls.
 
 ```bash
 test -e "$INPUT_PATH" || { echo "ERROR: input not found: $INPUT_PATH"; exit 1; }
@@ -63,15 +63,7 @@ else
 fi
 
 echo "Detected route: $ROUTE ($INPUT_KIND)"
-```
 
-**After running the detection block above, continue to Step 0.3 and 0.4 below. Do NOT skip ahead to Route A or Route B yet.**
-
-### 0.3 Derive workspace, clean stale data, save variables
-
-Run this block as one bash command. Copy it exactly — do NOT rewrite or chain with `&&`.
-
-```bash
 mkdir -p "$OUTPUT_DIR"
 STEM=$(basename "$INPUT_PATH")
 STEM="${STEM%.*}"
@@ -97,7 +89,7 @@ cat .atd-env.sh
 echo "Model profile: $VLM_PROFILE"
 ```
 
-**VERIFY**: If `cat .atd-env.sh` does NOT print the variables above, STOP immediately. Do not continue.
+**VERIFY**: If `cat .atd-env.sh` shows `ROUTE=""`, STOP immediately. Route detection failed.
 
 Validate tools and fixed scripts needed for the detected route. Run ONLY the block for your detected ROUTE. Do NOT run the other route's block.
 
