@@ -560,6 +560,80 @@ def _try_replace_table_text(table_el, ocr_regions, page_num):
 
 
 # ---------------------------------------------------------------------------
+# OCR-only page generation (fallback when VLM XML is missing)
+# ---------------------------------------------------------------------------
+
+
+def _generate_page_from_ocr(ocr_regions, page_num, page_width=612, page_height=792):
+    """Generate a <page> element purely from OCR data when VLM XML is missing.
+
+    Creates headings, paragraphs, and image placeholders based on OCR regions.
+    Uses the same heading-level logic as the merge path (markdown markers +
+    native_label fallback).
+    """
+    page_el = etree.Element("page")
+    page_el.set("number", str(page_num))
+    page_el.set("width-pts", str(page_width))
+    page_el.set("height-pts", str(page_height))
+    page_el.set("margin-top-cm", "1.27")
+    page_el.set("margin-bottom-cm", "1.27")
+    page_el.set("margin-left-cm", "1.27")
+    page_el.set("margin-right-cm", "1.27")
+    page_el.set("font-latin", "Arial")
+    page_el.set("font-cjk", "SimSun")
+
+    page_idx = page_num - 1  # 0-based for image path construction
+    img_counter = 0
+
+    for region in ocr_regions:
+        if region is None:
+            continue
+
+        label = region.get("label", "text")
+        native = region.get("native_label", "")
+        content = region.get("content") or ""
+        bbox = region.get("bbox_2d")
+
+        # --- Image region ---
+        if label == "image":
+            img_el = etree.SubElement(page_el, "image")
+            # Use OCR index to construct path
+            idx = region.get("index", img_counter)
+            src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{idx}.jpg"
+            img_el.set("src", src)
+            if bbox:
+                img_el.set("bbox", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}")
+            img_el.set("page-width-pts", str(page_width))
+            img_counter += 1
+            continue
+
+        # --- Text region ---
+        cleaned, heading_level = _clean_ocr_text(content)
+        if not cleaned:
+            continue
+
+        # native_label fallback for heading level
+        if heading_level == 0 and native == "doc_title":
+            heading_level = 1
+        elif heading_level == 0 and native == "paragraph_title":
+            heading_level = 2
+
+        if heading_level > 0:
+            elem = etree.SubElement(page_el, "heading",
+                                    level=str(heading_level), alignment="left")
+            size = _HEADING_FONT_SIZES.get(heading_level, "11")
+            run = etree.SubElement(elem, "run",
+                                   attrib={"font-size-pt": size, "bold": "true"})
+        else:
+            elem = etree.SubElement(page_el, "paragraph", alignment="left")
+            run = etree.SubElement(elem, "run",
+                                   attrib={"font-size-pt": "11"})
+        run.text = cleaned
+
+    return page_el
+
+
+# ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
 
@@ -664,6 +738,13 @@ def merge_page(workspace, page_num, ocr_data):
     # Load VLM XML
     page_el = load_vlm_xml(workspace, page_num)
     if page_el is None:
+        # Fallback: generate page purely from OCR data
+        page_idx = page_num - 1
+        ocr_regions = ocr_data[page_idx] if page_idx < len(ocr_data) else []
+        if ocr_regions:
+            print(f"  Page {page_num}: no VLM XML — generating from OCR ({len(ocr_regions)} regions)")
+            page_el = _generate_page_from_ocr(ocr_regions, page_num)
+            return etree.tostring(page_el, encoding="unicode", pretty_print=True)
         return None
 
     # Deep copy to avoid modifying original
