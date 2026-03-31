@@ -90,6 +90,14 @@ fi
 mkdir -p "$WORKSPACE"
 SCRIPT_ROOT=".claude/skills"
 
+# Detect VLM model profile (default: weak for local models)
+VLM_PROFILE="${VLM_MODEL_PROFILE:-weak}"
+case "${VLM_MODEL:-}" in
+  *gpt-4*|*claude*|*gemini*|*70b*|*70B*|*72b*|*72B*)
+    VLM_PROFILE="strong"
+    ;;
+esac
+
 # Save all variables for subsequent bash calls
 cat > .atd-env.sh << ENVEOF
 export INPUT_PATH="$INPUT_PATH"
@@ -101,8 +109,11 @@ export SCRIPT_ROOT="$SCRIPT_ROOT"
 export OUTPUT_DIR="$OUTPUT_DIR"
 export TARGET_LANG="${TARGET_LANG:-}"
 export STYLE_NOTES="${STYLE_NOTES:-}"
+export VLM_PROFILE="$VLM_PROFILE"
+export VLM_MODEL_PROFILE="$VLM_PROFILE"
 ENVEOF
 echo "Variables saved to .atd-env.sh"
+echo "Model profile: $VLM_PROFILE"
 ```
 
 Validate tools and fixed scripts needed for the detected route. Run ONLY the block for your detected ROUTE. Do NOT run the other route's block.
@@ -301,7 +312,7 @@ Print this checklist now. After each step, reprint it with `[x]` and filled valu
 
 ```
 Route B Progress:
-- [ ] B0: VLM_PROFILE=___
+- [ ] B0: VLM_PROFILE=___ (from .atd-env.sh)
 - [ ] B1: PAGE_COUNT=___
 - [ ] B2: OCR pages=___ regions=___
 - [ ] B3: VLM XML count=___
@@ -312,22 +323,13 @@ Route B Progress:
 - [ ] B8: final-output.docx path=___
 ```
 
-### B0: Detect Model Profile
+### B0: Confirm Model Profile
 
-Run this exact block. Do not modify.
+VLM_PROFILE was already set in Step 0.3. Just confirm it:
 
 ```bash
 source .atd-env.sh
-VLM_PROFILE="${VLM_MODEL_PROFILE:-weak}"
-case "${VLM_MODEL:-}" in
-  *gpt-4*|*claude*|*gemini*|*70b*|*70B*|*72b*|*72B*)
-    VLM_PROFILE="strong"
-    ;;
-esac
-export VLM_MODEL_PROFILE="$VLM_PROFILE"
-echo "export VLM_PROFILE=\"$VLM_PROFILE\"" >> .atd-env.sh
-echo "export VLM_MODEL_PROFILE=\"$VLM_PROFILE\"" >> .atd-env.sh
-echo "Model profile: $VLM_PROFILE"
+echo "VLM_PROFILE=$VLM_PROFILE"
 ```
 
 ### B1: Prepare Input Images
@@ -343,7 +345,7 @@ pdftocairo -png -r 220 "$INPUT_PATH" "$WORKSPACE/input-images/page"
 for f in "$WORKSPACE/input-images"/page-*.png; do
   base=$(basename "$f" .png)
   num=$(echo "$base" | sed 's/page-0*//')
-  [ "$base" != "page-${num}" ] && mv "$f" "$WORKSPACE/input-images/page-${num}.png"
+  [ "$base" != "page-${num}" ] && mv "$f" "$WORKSPACE/input-images/page-${num}.png" || true
 done
 
 PAGE_COUNT=$(ls "$WORKSPACE/input-images"/page-*.png | wc -l | tr -d ' ')
