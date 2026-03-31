@@ -803,6 +803,15 @@ def merge_page(workspace, page_num, ocr_data):
         if gap_count:
             print(f"  Page {page_num}: appended {gap_count} OCR gap elements")
 
+    # Step 6: Remove unresolved PLACEHOLDER images (avoids "[Image missing]" in DOCX)
+    placeholder_removed = 0
+    for img_el in page_el.findall(".//image"):
+        if img_el.get("src") in ("PLACEHOLDER", "", None):
+            img_el.getparent().remove(img_el)
+            placeholder_removed += 1
+    if placeholder_removed:
+        print(f"  Page {page_num}: removed {placeholder_removed} unresolved placeholder images")
+
     return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
 
