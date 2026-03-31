@@ -190,6 +190,24 @@ def encode_image_to_base64(image_path):
         return base64.b64encode(f.read()).decode("ascii")
 
 
+def _encode_resized_image(image_path, max_width=768):
+    """Resize image to max_width and return base64-encoded JPEG string.
+
+    Used for layout visualization images to reduce VLM inference time.
+    """
+    from PIL import Image
+    import io
+
+    img = Image.open(image_path)
+    if img.width > max_width:
+        ratio = max_width / img.width
+        new_size = (max_width, int(img.height * ratio))
+        img = img.resize(new_size, Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=75)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
 def compute_batches(total_pages, batch_size):
     """Return list of (start, end) tuples, 1-indexed inclusive.
 
@@ -276,6 +294,7 @@ def build_image_content_items(workspace, start, end):
         })
 
         # Layout visualization (weak profile only — helps model see structure)
+        # Resized to max 768px wide to keep inference time reasonable
         if VLM_MODEL_PROFILE == "weak":
             page_idx = n - 1  # layout_vis uses 0-based indexing
             layout_path = os.path.join(
@@ -283,7 +302,7 @@ def build_image_content_items(workspace, start, end):
                 f"input_page{page_idx}.jpg"
             )
             if os.path.exists(layout_path):
-                b64_layout = encode_image_to_base64(layout_path)
+                b64_layout = _encode_resized_image(layout_path, max_width=768)
                 items.append({
                     "type": "image_url",
                     "image_url": {
