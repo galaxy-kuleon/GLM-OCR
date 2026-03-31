@@ -22,6 +22,21 @@ import time
 import requests
 from lxml import etree
 
+from constants import (
+    IMAGE_JPEG_QUALITY,
+    IMAGE_LAYOUT_VIS_MAX_WIDTH,
+    IMAGE_WEAK_PAGE_MAX_WIDTH,
+    VLM_DEFAULT_API_KEY,
+    VLM_DEFAULT_ENDPOINT,
+    VLM_DEFAULT_MAX_TOKENS,
+    VLM_DEFAULT_MODEL,
+    VLM_DEFAULT_RETRY_DELAY,
+    VLM_DEFAULT_TEMPERATURE,
+    VLM_DEFAULT_TIMEOUT,
+    VLM_PROFILE_STRONG_BATCH_SIZE,
+    VLM_PROFILE_WEAK_BATCH_SIZE,
+)
+
 # ---------------------------------------------------------------------------
 # VLM Configuration — override any value via environment variable
 # ---------------------------------------------------------------------------
@@ -31,37 +46,37 @@ from lxml import etree
 VLM_MODEL_PROFILE = os.environ.get("VLM_MODEL_PROFILE", "strong")
 
 # LMStudio local endpoint; override with VLM_ENDPOINT env var for remote/cloud VLM
-VLM_ENDPOINT = os.environ.get("VLM_ENDPOINT", "http://localhost:1234/v1/chat/completions")
+VLM_ENDPOINT = os.environ.get("VLM_ENDPOINT", VLM_DEFAULT_ENDPOINT)
 
 # Qwen3.5-122B-A10B: native multimodal VLM with 256K context, 65K output
-VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.5-35b-a3b")
+VLM_MODEL = os.environ.get("VLM_MODEL", VLM_DEFAULT_MODEL)
 
 # LMStudio ignores API keys, but OpenAI-compatible API requires the header
-VLM_API_KEY = os.environ.get("VLM_API_KEY", "lm-studio")
+VLM_API_KEY = os.environ.get("VLM_API_KEY", VLM_DEFAULT_API_KEY)
 
 # 10 min — an 8-page batch generating detailed XML takes ~3-5 min on consumer GPUs
-VLM_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", "600"))
+VLM_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", str(VLM_DEFAULT_TIMEOUT)))
 
 # Qwen3.5 supports up to 128K output tokens; large pages need ~3-5K tokens each
-VLM_MAX_TOKENS = int(os.environ.get("VLM_MAX_TOKENS", "131072"))
+VLM_MAX_TOKENS = int(os.environ.get("VLM_MAX_TOKENS", str(VLM_DEFAULT_MAX_TOKENS)))
 
 # 2 min between retries — gives GPU time to recover from OOM or thermal throttle
-RETRY_DELAY = int(os.environ.get("VLM_RETRY_DELAY", "120"))
+RETRY_DELAY = int(os.environ.get("VLM_RETRY_DELAY", str(VLM_DEFAULT_RETRY_DELAY)))
 
 # Low temperature for deterministic structured XML output (not creative text)
-VLM_TEMPERATURE = float(os.environ.get("VLM_TEMPERATURE", "0.6"))
+VLM_TEMPERATURE = float(os.environ.get("VLM_TEMPERATURE", str(VLM_DEFAULT_TEMPERATURE)))
 
 # Profile-dependent defaults (overridden by explicit env vars)
 _PROFILE_DEFAULTS = {
     "strong": {
-        "batch_size": 8,
-        "max_tokens": 131072,
-        "temperature": 0.6,
+        "batch_size": VLM_PROFILE_STRONG_BATCH_SIZE,
+        "max_tokens": VLM_DEFAULT_MAX_TOKENS,
+        "temperature": VLM_DEFAULT_TEMPERATURE,
     },
     "weak": {
-        "batch_size": 1,      # one page at a time to ensure complete coverage
-        "max_tokens": 131072,  # qwen3.5 supports 128k output
-        "temperature": 0.6,    # qwen3.5 35b-a3b needs 0.6 for quality output
+        "batch_size": VLM_PROFILE_WEAK_BATCH_SIZE,      # one page at a time to ensure complete coverage
+        "max_tokens": VLM_DEFAULT_MAX_TOKENS,             # qwen3.5 supports 128k output
+        "temperature": VLM_DEFAULT_TEMPERATURE,            # qwen3.5 35b-a3b needs 0.6 for quality output
     },
 }
 
@@ -190,7 +205,7 @@ def encode_image_to_base64(image_path):
         return base64.b64encode(f.read()).decode("ascii")
 
 
-def _encode_resized_image(image_path, max_width=768):
+def _encode_resized_image(image_path, max_width=IMAGE_LAYOUT_VIS_MAX_WIDTH):
     """Resize image to max_width and return base64-encoded JPEG string.
 
     Used for layout visualization images to reduce VLM inference time.
@@ -204,7 +219,7 @@ def _encode_resized_image(image_path, max_width=768):
         new_size = (max_width, int(img.height * ratio))
         img = img.resize(new_size, Image.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=75)
+    img.save(buf, format="JPEG", quality=IMAGE_JPEG_QUALITY)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
@@ -284,7 +299,7 @@ def build_image_content_items(workspace, start, end):
     items = []
     # Weak models get resized page images (1024px wide) to reduce inference time.
     # OCR runs on full-resolution images separately.
-    page_max_width = 1024 if VLM_MODEL_PROFILE == "weak" else None
+    page_max_width = IMAGE_WEAK_PAGE_MAX_WIDTH if VLM_MODEL_PROFILE == "weak" else None
 
     for n in range(start, end + 1):
         # Raw page image (resized for weak models)
@@ -311,7 +326,7 @@ def build_image_content_items(workspace, start, end):
                 f"input_page{page_idx}.jpg"
             )
             if os.path.exists(layout_path):
-                b64_layout = _encode_resized_image(layout_path, max_width=768)
+                b64_layout = _encode_resized_image(layout_path, max_width=IMAGE_LAYOUT_VIS_MAX_WIDTH)
                 items.append({
                     "type": "image_url",
                     "image_url": {

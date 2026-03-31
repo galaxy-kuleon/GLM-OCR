@@ -27,6 +27,38 @@ from pathlib import Path
 
 from lxml import etree
 
+from constants import (
+    MERGE_ACCEPT_THRESHOLD,
+    MERGE_BASE_SIM_THRESHOLD,
+    MERGE_DEFAULT_FONT_SIZE_PT,
+    MERGE_DUPLICATE_SIMILARITY,
+    MERGE_GAP_MIN_CHARS,
+    MERGE_HEADING_FONT_SIZES,
+    MERGE_IMAGE_IOU_THRESHOLD,
+    MERGE_LABEL_BONUS,
+    MERGE_LENGTH_RATIO_MAX,
+    MERGE_LENGTH_RATIO_SIM_OVERRIDE,
+    MERGE_LONG_TEXT_CHAR_WEIGHT,
+    MERGE_LONG_TEXT_WORD_WEIGHT,
+    MERGE_LOOK_AROUND,
+    MERGE_PROXIMITY_BONUS_PER_UNIT,
+    MERGE_PROXIMITY_DISTANCE,
+    MERGE_QUALITY_GATE_MATCH_RATE,
+    MERGE_QUALITY_GATE_MIN_OCR_REGIONS,
+    MERGE_SHORT_TEXT_CHAR_WEIGHT,
+    MERGE_SHORT_TEXT_WORD_THRESHOLD,
+    MERGE_SHORT_TEXT_WORD_WEIGHT,
+    MERGE_SUPERSET_CONTAINMENT_THRESHOLD,
+    MERGE_SUPERSET_MIN_CONTAINED,
+    MERGE_TABLE_CELL_IOU_THRESHOLD,
+    MERGE_TABLE_CELL_SIMILARITY,
+    PAGE_DEFAULT_FONT_CJK,
+    PAGE_DEFAULT_FONT_LATIN,
+    PAGE_DEFAULT_HEIGHT_PTS,
+    PAGE_DEFAULT_MARGIN_CM,
+    PAGE_DEFAULT_WIDTH_PTS,
+)
+
 
 # ---------------------------------------------------------------------------
 # OCR artifact cleanup (shared pattern with other pipeline scripts)
@@ -122,9 +154,9 @@ def combined_similarity(a, b):
     word_sim = text_similarity(a, b)
     char_sim = _char_overlap_ratio(a, b)
     word_count = len(_normalize_for_match(a).split())
-    if word_count < 5:
-        return 0.4 * word_sim + 0.6 * char_sim
-    return 0.7 * word_sim + 0.3 * char_sim
+    if word_count < MERGE_SHORT_TEXT_WORD_THRESHOLD:
+        return MERGE_SHORT_TEXT_WORD_WEIGHT * word_sim + MERGE_SHORT_TEXT_CHAR_WEIGHT * char_sim
+    return MERGE_LONG_TEXT_WORD_WEIGHT * word_sim + MERGE_LONG_TEXT_CHAR_WEIGHT * char_sim
 
 
 # ---------------------------------------------------------------------------
@@ -207,9 +239,9 @@ def _dedup_image_regions(image_regions):
         for j, (_, bb_j, area_j) in enumerate(tagged):
             if i == j:
                 continue
-            if area_j < area_i and _containment(bb_j, bb_i) > 0.7:
+            if area_j < area_i and _containment(bb_j, bb_i) > MERGE_SUPERSET_CONTAINMENT_THRESHOLD:
                 contained_count += 1
-        if contained_count >= 2:
+        if contained_count >= MERGE_SUPERSET_MIN_CONTAINED:
             superset_indices.add(i)
 
     return [r for i, (r, _, _) in enumerate(tagged) if i not in superset_indices]
@@ -299,13 +331,13 @@ def collect_text_elements(page_el):
 # ---------------------------------------------------------------------------
 
 
-_HEADING_FONT_SIZES = {1: "18", 2: "14", 3: "12", 4: "11", 5: "11", 6: "10"}
+_HEADING_FONT_SIZES = MERGE_HEADING_FONT_SIZES
 
 
 def _fix_heading_level(elem, ocr_level):
     """Correct heading level and font-size using OCR's markdown markers."""
     elem.set("level", str(ocr_level))
-    target_size = _HEADING_FONT_SIZES.get(ocr_level, "11")
+    target_size = _HEADING_FONT_SIZES.get(ocr_level, MERGE_DEFAULT_FONT_SIZE_PT)
     for run in elem.findall("run"):
         run.set("font-size-pt", target_size)
 
@@ -372,7 +404,6 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
     consumed = set()
     ocr_cursor = 0
     replaced = 0
-    LOOK_AROUND = 6  # search window in both directions
 
     for ve in vlm_elements:
         vlm_text = ve["text"]
@@ -382,8 +413,8 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
         best_score = 0.0
         best_idx = -1
 
-        search_start = max(0, ocr_cursor - LOOK_AROUND)
-        search_end = min(len(text_regions), ocr_cursor + LOOK_AROUND)
+        search_start = max(0, ocr_cursor - MERGE_LOOK_AROUND)
+        search_end = min(len(text_regions), ocr_cursor + MERGE_LOOK_AROUND)
 
         for i in range(search_start, search_end):
             if i in consumed:
@@ -393,14 +424,14 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
             base_sim = combined_similarity(vlm_text, ocr_r["content"])
 
             # Minimum base similarity — prevent bonuses from promoting bad matches
-            if base_sim < 0.2:
+            if base_sim < MERGE_BASE_SIM_THRESHOLD:
                 continue
 
-            # Reject matches where text lengths differ wildly (>5x ratio).
+            # Reject matches where text lengths differ wildly.
             len_vlm = max(len(vlm_text), 1)
             len_ocr = max(len(ocr_r["content"]), 1)
             length_ratio = max(len_vlm, len_ocr) / min(len_vlm, len_ocr)
-            if length_ratio > 5 and base_sim < 0.5:
+            if length_ratio > MERGE_LENGTH_RATIO_MAX and base_sim < MERGE_LENGTH_RATIO_SIM_OVERRIDE:
                 continue
 
             # OCR heading regions must match VLM heading elements (not paragraphs)
@@ -412,11 +443,11 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
 
             # Label matching bonus
             if _label_matches_type(ocr_r["native_label"], ve["type"]):
-                sim += 0.1
+                sim += MERGE_LABEL_BONUS
 
             # Proximity bonus (prefer closer to cursor)
             distance = abs(i - ocr_cursor)
-            proximity_bonus = 0.05 * max(0, 3 - distance)
+            proximity_bonus = MERGE_PROXIMITY_BONUS_PER_UNIT * max(0, MERGE_PROXIMITY_DISTANCE - distance)
             sim += proximity_bonus
 
             if sim > best_score:
@@ -424,7 +455,7 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
                 best_idx = i
 
         # Threshold for accepting a match
-        if best_idx >= 0 and best_score > 0.25:
+        if best_idx >= 0 and best_score > MERGE_ACCEPT_THRESHOLD:
             _replace_element_text(ve["element"], text_regions[best_idx]["content"])
             # Fix heading level from OCR markers (OCR knows ## = h2, etc.)
             ocr_hlevel = text_regions[best_idx].get("heading_level", 0)
@@ -453,19 +484,19 @@ def _append_gap_elements(page_el, unmatched_regions):
     added = 0
     for region in unmatched_regions:
         content = region["content"]
-        if len(content) <= 5:
+        if len(content) <= MERGE_GAP_MIN_CHARS:
             continue
         hlevel = region.get("heading_level", 0)
         if hlevel > 0:
             elem = etree.SubElement(page_el, "heading",
                                     level=str(hlevel), alignment="left")
-            size = _HEADING_FONT_SIZES.get(hlevel, "11")
+            size = _HEADING_FONT_SIZES.get(hlevel, MERGE_DEFAULT_FONT_SIZE_PT)
             run = etree.SubElement(elem, "run",
                                    attrib={"font-size-pt": size, "bold": "true"})
         else:
             elem = etree.SubElement(page_el, "paragraph", alignment="left")
             run = etree.SubElement(elem, "run",
-                                   attrib={"font-size-pt": "11"})
+                                   attrib={"font-size-pt": MERGE_DEFAULT_FONT_SIZE_PT})
         run.text = content
         added += 1
     return added
@@ -513,7 +544,7 @@ def resolve_images(page_el, ocr_regions, page_num):
                     best_iou = iou
                     best_region = ocr_img
 
-            if best_region and best_iou > 0.05:
+            if best_region and best_iou > MERGE_IMAGE_IOU_THRESHOLD:
                 page_idx = page_num - 1  # 0-based
                 img_idx = best_region.get("_image_idx", best_region.get("index", 0))
                 src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
@@ -561,7 +592,7 @@ def _try_replace_table_text(table_el, ocr_regions, page_num):
             continue
         ocr_bbox = r.get("bbox_2d", [0, 0, 0, 0])
         iou = compute_bbox_iou(table_bbox, ocr_bbox)
-        if iou > 0.01:
+        if iou > MERGE_TABLE_CELL_IOU_THRESHOLD:
             content, _ = _clean_ocr_text(r.get("content", ""))
             if content:
                 overlapping.append({
@@ -595,7 +626,7 @@ def _try_replace_table_text(table_el, ocr_regions, page_num):
                     best_sim = sim
                     best_content = ocr_r["content"]
 
-            if best_content and best_sim > 0.5:
+            if best_content and best_sim > MERGE_TABLE_CELL_SIMILARITY:
                 run_children = cell_el.findall("run")
                 if run_children:
                     run_children[0].text = best_content
@@ -613,7 +644,9 @@ def _try_replace_table_text(table_el, ocr_regions, page_num):
 # ---------------------------------------------------------------------------
 
 
-def _generate_page_from_ocr(ocr_regions, page_num, workspace=None, page_width=612, page_height=792):
+def _generate_page_from_ocr(ocr_regions, page_num, workspace=None,
+                            page_width=PAGE_DEFAULT_WIDTH_PTS,
+                            page_height=PAGE_DEFAULT_HEIGHT_PTS):
     """Generate a <page> element purely from OCR data when VLM XML is missing.
 
     Creates headings, paragraphs, and image placeholders based on OCR regions.
@@ -624,12 +657,12 @@ def _generate_page_from_ocr(ocr_regions, page_num, workspace=None, page_width=61
     page_el.set("number", str(page_num))
     page_el.set("width-pts", str(page_width))
     page_el.set("height-pts", str(page_height))
-    page_el.set("margin-top-cm", "1.27")
-    page_el.set("margin-bottom-cm", "1.27")
-    page_el.set("margin-left-cm", "1.27")
-    page_el.set("margin-right-cm", "1.27")
-    page_el.set("font-latin", "Arial")
-    page_el.set("font-cjk", "SimSun")
+    page_el.set("margin-top-cm", PAGE_DEFAULT_MARGIN_CM)
+    page_el.set("margin-bottom-cm", PAGE_DEFAULT_MARGIN_CM)
+    page_el.set("margin-left-cm", PAGE_DEFAULT_MARGIN_CM)
+    page_el.set("margin-right-cm", PAGE_DEFAULT_MARGIN_CM)
+    page_el.set("font-latin", PAGE_DEFAULT_FONT_LATIN)
+    page_el.set("font-cjk", PAGE_DEFAULT_FONT_CJK)
 
     page_idx = page_num - 1  # 0-based for image path construction
 
@@ -687,13 +720,13 @@ def _generate_page_from_ocr(ocr_regions, page_num, workspace=None, page_width=61
         if heading_level > 0:
             elem = etree.SubElement(page_el, "heading",
                                     level=str(heading_level), alignment="left")
-            size = _HEADING_FONT_SIZES.get(heading_level, "11")
+            size = _HEADING_FONT_SIZES.get(heading_level, MERGE_DEFAULT_FONT_SIZE_PT)
             run = etree.SubElement(elem, "run",
                                    attrib={"font-size-pt": size, "bold": "true"})
         else:
             elem = etree.SubElement(page_el, "paragraph", alignment="left")
             run = etree.SubElement(elem, "run",
-                                   attrib={"font-size-pt": "11"})
+                                   attrib={"font-size-pt": MERGE_DEFAULT_FONT_SIZE_PT})
         run.text = cleaned
 
     return page_el
@@ -768,7 +801,7 @@ def _dedup_consecutive_elements(page_el):
         text = _get_element_text(child)
         if prev_text and text:
             sim = combined_similarity(prev_text, text)
-            if sim > 0.8:
+            if sim > MERGE_DUPLICATE_SIMILARITY:
                 # Remove the less-styled duplicate: prefer heading over paragraph
                 if prev_elem.tag == "heading" and child.tag == "paragraph":
                     page_el.remove(child)
@@ -834,7 +867,7 @@ def merge_page(workspace, page_num, ocr_data):
     # Quality gate: if VLM match rate is very low, OCR-only page is likely better
     # (VLM structure is too broken to be useful as scaffold)
     ocr_text_regions = [r for r in ocr_regions if r and r.get("label") != "image"]
-    if total > 0 and replaced / total < 0.3 and len(ocr_text_regions) >= 2:
+    if total > 0 and replaced / total < MERGE_QUALITY_GATE_MATCH_RATE and len(ocr_text_regions) >= MERGE_QUALITY_GATE_MIN_OCR_REGIONS:
         print(f"  Page {page_num}: match rate {replaced/total:.0%} < 30% — switching to OCR-only")
         page_el = _generate_page_from_ocr(ocr_regions, page_num, workspace=workspace)
         return etree.tostring(page_el, encoding="unicode", pretty_print=True)
