@@ -282,14 +282,23 @@ def build_image_content_items(workspace, start, end):
     glm-ocr (colored bounding boxes with region labels) when available.
     """
     items = []
+    # Weak models get resized page images (1024px wide) to reduce inference time.
+    # OCR runs on full-resolution images separately.
+    page_max_width = 1024 if VLM_MODEL_PROFILE == "weak" else None
+
     for n in range(start, end + 1):
-        # Raw page image
+        # Raw page image (resized for weak models)
         image_path = os.path.join(workspace, "input-images", f"page-{n}.png")
-        b64 = encode_image_to_base64(image_path)
+        if page_max_width:
+            b64 = _encode_resized_image(image_path, max_width=page_max_width)
+            mime = "image/jpeg"
+        else:
+            b64 = encode_image_to_base64(image_path)
+            mime = "image/png"
         items.append({
             "type": "image_url",
             "image_url": {
-                "url": f"data:image/png;base64,{b64}",
+                "url": f"data:{mime};base64,{b64}",
             },
         })
 
