@@ -328,6 +328,11 @@ PAGE_COUNT=$(ls "$WORKSPACE/input-images"/page-*.png | wc -l | tr -d ' ')
 pdfinfo "$INPUT_PATH" > "$WORKSPACE/pdf-info.txt"
 pdftotext "$INPUT_PATH" "$WORKSPACE/pdf-fulltext.txt"
 
+# Extract embedded images at original quality (logos, diagrams, signatures)
+mkdir -p "$WORKSPACE/pdf-images"
+pdfimages -png -p "$INPUT_PATH" "$WORKSPACE/pdf-images/img"
+echo "Extracted $(ls "$WORKSPACE/pdf-images"/img-*.png 2>/dev/null | wc -l | tr -d ' ') embedded images"
+
 uv run .claude/skills/anything-to-docx/scripts/create_pdf_image_info.py \
   --workspace "$WORKSPACE" --pdf-info "$WORKSPACE/pdf-info.txt" --dpi 220
 

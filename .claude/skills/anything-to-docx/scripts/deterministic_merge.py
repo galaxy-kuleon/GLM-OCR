@@ -510,15 +510,125 @@ def _append_gap_elements(page_el, unmatched_regions):
 
 
 # ---------------------------------------------------------------------------
+# PDF-extracted image support
+# ---------------------------------------------------------------------------
+
+
+def _build_pdf_images_map(workspace, total_pages):
+    """Build a map of PDF-extracted original images for all pages.
+
+    Scans pdf-images/ directory once. Filters out:
+    1. smask (alpha mask) files (grayscale mode 'L')
+    2. Repeating images that appear on 3+ pages (headers, footers, watermarks)
+       Detected by file-size fingerprint — same embedded image = same bytes.
+
+    Returns dict: page_num -> [(path, width, height)]
+    """
+    pdf_dir = Path(workspace) / "pdf-images"
+    if not pdf_dir.exists():
+        return {}
+
+    import glob as _glob
+    import hashlib
+    from PIL import Image as _PILImage
+
+    # Collect all non-smask images grouped by page
+    all_images = {}  # page_num -> [(path, width, height, file_hash)]
+    for page_num in range(1, total_pages + 1):
+        pattern = str(pdf_dir / f"img-{page_num:03d}-*.png")
+        candidates = sorted(_glob.glob(pattern))
+        page_imgs = []
+        for path in candidates:
+            try:
+                img = _PILImage.open(path)
+                if img.mode != "L":  # skip smask
+                    # Hash by file size + dimensions (fast, good enough for dedup)
+                    fsize = os.path.getsize(path)
+                    fhash = f"{fsize}_{img.width}x{img.height}"
+                    page_imgs.append((path, img.width, img.height, fhash))
+                img.close()
+            except Exception:
+                continue
+        all_images[page_num] = page_imgs
+
+    # Count how many pages each image fingerprint appears on
+    hash_page_count = {}
+    for page_num, imgs in all_images.items():
+        for _, _, _, fhash in imgs:
+            if fhash not in hash_page_count:
+                hash_page_count[fhash] = set()
+            hash_page_count[fhash].add(page_num)
+
+    # Filter: exclude images appearing on 3+ pages (repeating headers/footers)
+    repeat_threshold = min(3, max(2, total_pages // 2))
+    repeating_hashes = {h for h, pages in hash_page_count.items()
+                        if len(pages) >= repeat_threshold}
+
+    result = {}
+    for page_num, imgs in all_images.items():
+        filtered = [(p, w, h) for p, w, h, fhash in imgs
+                     if fhash not in repeating_hashes]
+        if filtered:
+            result[page_num] = filtered
+
+    if repeating_hashes:
+        total_filtered = sum(1 for imgs in all_images.values()
+                             for _, _, _, fh in imgs if fh in repeating_hashes)
+        print(f"  PDF images: filtered {total_filtered} repeating header/footer images across pages")
+
+    return result
+
+
+def _match_pdf_image(pdf_images, ocr_bbox, page_width_pts=612, page_height_pts=792):
+    """Find the best PDF-extracted image matching an OCR bbox by aspect ratio.
+
+    OCR bbox is [x1, y1, x2, y2] normalized 0-1000.
+    PDF image has (path, pixel_width, pixel_height).
+
+    Returns (path, index) of best match, or (None, -1) if no good match.
+    """
+    if not pdf_images or not ocr_bbox:
+        return None, -1
+
+    # OCR bbox aspect ratio (in page-relative units)
+    ocr_w = max(ocr_bbox[2] - ocr_bbox[0], 1)
+    ocr_h = max(ocr_bbox[3] - ocr_bbox[1], 1)
+    # Adjust for page aspect ratio (bbox is normalized, page may not be square)
+    ocr_aspect = (ocr_w / 1000 * page_width_pts) / (ocr_h / 1000 * page_height_pts)
+
+    best_idx = -1
+    best_score = float("inf")
+    for i, (path, pw, ph) in enumerate(pdf_images):
+        if ph == 0:
+            continue
+        pdf_aspect = pw / ph
+        # Score = how different the aspect ratios are (lower = better)
+        score = abs(pdf_aspect - ocr_aspect) / max(pdf_aspect, ocr_aspect, 0.01)
+        if score < best_score:
+            best_score = score
+            best_idx = i
+
+    # Accept if aspect ratio is within 50% — generous threshold for different crops
+    if best_idx >= 0 and best_score < 0.5:
+        return pdf_images[best_idx][0], best_idx
+    return None, -1
+
+
+# ---------------------------------------------------------------------------
 # Image resolution
 # ---------------------------------------------------------------------------
 
 
-def resolve_images(page_el, ocr_regions, page_num):
+def resolve_images(page_el, ocr_regions, page_num, workspace=None,
+                    pdf_images_map=None):
     """Set image src paths from OCR image regions by bbox matching.
 
     For each VLM <image> element, find the best matching OCR image
     region by bbox IoU and set the src to the OCR cropped image path.
+    When PDF-extracted originals are available, prefer them over OCR crops.
+
+    Args:
+        pdf_images_map: dict from _build_pdf_images_map(), or None.
 
     Modifies page_el in place. Returns count of resolved images.
     """
@@ -532,6 +642,14 @@ def resolve_images(page_el, ocr_regions, page_num):
 
     vlm_images = page_el.findall(".//image")
     resolved = 0
+
+    # PDF-extracted originals for this page (repeating images already filtered)
+    pdf_images = (pdf_images_map or {}).get(page_num, [])
+    pdf_used = set()  # Track consumed pdf-images by index
+
+    # Get page dimensions from page_el for aspect ratio calculation
+    page_width_pts = float(page_el.get("width-pts", "612"))
+    page_height_pts = float(page_el.get("height-pts", "792"))
 
     # Track image index for this page
     image_counter = 0
@@ -557,12 +675,29 @@ def resolve_images(page_el, ocr_regions, page_num):
             if best_region and best_iou > MERGE_IMAGE_IOU_THRESHOLD:
                 page_idx = page_num - 1  # 0-based
                 img_idx = best_region.get("_image_idx", best_region.get("index", 0))
-                src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
-                img_el.set("src", src)
+                ocr_src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
+
                 # Replace VLM bbox with OCR bbox — OCR is more accurate for sizing
                 ocr_bbox = best_region.get("bbox_2d")
                 if ocr_bbox and len(ocr_bbox) == 4:
                     img_el.set("bbox", f"{ocr_bbox[0]},{ocr_bbox[1]},{ocr_bbox[2]},{ocr_bbox[3]}")
+
+                # Try to upgrade to PDF-extracted original
+                src = ocr_src
+                if pdf_images and ocr_bbox:
+                    available = [(p, w, h) for i, (p, w, h) in enumerate(pdf_images)
+                                 if i not in pdf_used]
+                    pdf_path, pdf_idx = _match_pdf_image(
+                        available, ocr_bbox, page_width_pts, page_height_pts)
+                    if pdf_path:
+                        src = os.path.relpath(pdf_path, workspace)
+                        # Find original index to mark as used
+                        for i, (p, _, _) in enumerate(pdf_images):
+                            if p == pdf_path:
+                                pdf_used.add(i)
+                                break
+
+                img_el.set("src", src)
                 resolved += 1
                 continue
 
@@ -571,13 +706,32 @@ def resolve_images(page_el, ocr_regions, page_num):
             region = image_regions.pop(0)
             page_idx = page_num - 1
             img_idx = region.get("_image_idx", region.get("index", 0))
-            src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
-            img_el.set("src", src)
+            ocr_src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
+
             # Replace VLM bbox with OCR bbox for correct sizing
             ocr_bbox = region.get("bbox_2d")
             if ocr_bbox and len(ocr_bbox) == 4:
                 img_el.set("bbox", f"{ocr_bbox[0]},{ocr_bbox[1]},{ocr_bbox[2]},{ocr_bbox[3]}")
+
+            # Try to upgrade to PDF-extracted original
+            src = ocr_src
+            if pdf_images and ocr_bbox:
+                available = [(p, w, h) for i, (p, w, h) in enumerate(pdf_images)
+                             if i not in pdf_used]
+                pdf_path, pdf_idx = _match_pdf_image(
+                    available, ocr_bbox, page_width_pts, page_height_pts)
+                if pdf_path:
+                    src = os.path.relpath(pdf_path, workspace)
+                    for i, (p, _, _) in enumerate(pdf_images):
+                        if p == pdf_path:
+                            pdf_used.add(i)
+                            break
+
+            img_el.set("src", src)
             resolved += 1
+
+    if pdf_used:
+        print(f"  Page {page_num}: upgraded {len(pdf_used)} images to PDF originals")
 
     return resolved
 
@@ -948,7 +1102,7 @@ def _dedup_consecutive_elements(page_el):
 # ---------------------------------------------------------------------------
 
 
-def merge_page(workspace, page_num, ocr_data):
+def merge_page(workspace, page_num, ocr_data, pdf_images_map=None):
     """Merge a single page deterministically.
 
     Args:
@@ -1020,7 +1174,9 @@ def merge_page(workspace, page_num, ocr_data):
             print(f"  Page {page_num}: improved {improved} table cells")
 
     # Step 3: Resolve image paths
-    img_count = resolve_images(page_el, ocr_regions, page_num)
+    img_count = resolve_images(page_el, ocr_regions, page_num,
+                               workspace=workspace,
+                               pdf_images_map=pdf_images_map)
     if img_count:
         print(f"  Page {page_num}: resolved {img_count} image paths")
 
@@ -1091,10 +1247,17 @@ def main():
     ocr_data = load_ocr_data(workspace)
     print(f"Loaded OCR data: {len(ocr_data)} pages")
 
+    # Build PDF-extracted images map (if available, for PDF inputs)
+    pdf_images_map = _build_pdf_images_map(workspace, total_pages)
+    if pdf_images_map:
+        total_pdf = sum(len(v) for v in pdf_images_map.values())
+        print(f"PDF images: {total_pdf} content images across {len(pdf_images_map)} pages")
+
     # Process each page
     success_count = 0
     for page_num in range(1, total_pages + 1):
-        merged_xml = merge_page(workspace, page_num, ocr_data)
+        merged_xml = merge_page(workspace, page_num, ocr_data,
+                                pdf_images_map=pdf_images_map)
 
         if merged_xml:
             out_path = output_dir / f"page-{page_num}.xml"
