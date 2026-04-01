@@ -559,6 +559,10 @@ def resolve_images(page_el, ocr_regions, page_num):
                 img_idx = best_region.get("_image_idx", best_region.get("index", 0))
                 src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
                 img_el.set("src", src)
+                # Replace VLM bbox with OCR bbox — OCR is more accurate for sizing
+                ocr_bbox = best_region.get("bbox_2d")
+                if ocr_bbox and len(ocr_bbox) == 4:
+                    img_el.set("bbox", f"{ocr_bbox[0]},{ocr_bbox[1]},{ocr_bbox[2]},{ocr_bbox[3]}")
                 resolved += 1
                 continue
 
@@ -569,6 +573,10 @@ def resolve_images(page_el, ocr_regions, page_num):
             img_idx = region.get("_image_idx", region.get("index", 0))
             src = f"ocr-output/input/imgs/cropped_page{page_idx}_idx{img_idx}.jpg"
             img_el.set("src", src)
+            # Replace VLM bbox with OCR bbox for correct sizing
+            ocr_bbox = region.get("bbox_2d")
+            if ocr_bbox and len(ocr_bbox) == 4:
+                img_el.set("bbox", f"{ocr_bbox[0]},{ocr_bbox[1]},{ocr_bbox[2]},{ocr_bbox[3]}")
             resolved += 1
 
     return resolved
