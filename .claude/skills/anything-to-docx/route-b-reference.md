@@ -14,10 +14,12 @@ Detailed procedures, workspace layout, environment variables, and error handling
 ## B6 Visual Verification
 
 Only run B6 if BOTH conditions are true:
+
 - The user explicitly asked for visual QA / extra layout polishing
 - `soffice` is available
 
 **Step 1: Check soffice:**
+
 ```bash
 command -v soffice >/dev/null && echo "B6 OK: soffice available" || echo "B6 SKIP: soffice not found"
 ```
@@ -25,6 +27,7 @@ command -v soffice >/dev/null && echo "B6 OK: soffice available" || echo "B6 SKI
 If `B6 SKIP`, return to main SKILL.md and continue to B7.
 
 **Step 2: Run visual verification:**
+
 ```bash
 uv run --with requests,Pillow \
   .claude/skills/pdf-to-docx/scripts/verify_docx_visual.py \
@@ -36,17 +39,18 @@ uv run --with requests,Pillow \
 
 Read each `$WORKSPACE/dsl/visual-review-page-{N}.json`. For each non-empty review:
 
-| Issue `type` | Fix action |
-|---|---|
-| `font_difference` | Edit `<run>` attribute in `page-{N}.xml` |
-| `missing_text` | Add content to `page-{N}.xml` |
-| `layout_difference` | Edit spacing/margin attributes |
-| `page_count_mismatch` | Reduce font sizes or margins |
-| Any other | Apply the `suggested_value` from the JSON |
+| Issue `type`          | Fix action                                |
+| --------------------- | ----------------------------------------- |
+| `font_difference`     | Edit `<run>` attribute in `page-{N}.xml`  |
+| `missing_text`        | Add content to `page-{N}.xml`             |
+| `layout_difference`   | Edit spacing/margin attributes            |
+| `page_count_mismatch` | Reduce font sizes or margins              |
+| Any other             | Apply the `suggested_value` from the JSON |
 
 **Step 4:** After fixing XML, re-run B5 (dsl_to_docx.py) **once**. Do NOT re-run B6.
 
 **Stop conditions:**
+
 - If a review JSON is ambiguous or suggests more than 10 fixes on one page → STOP and report the page number
 - If no issues found → return to main SKILL.md, continue to B7
 
@@ -79,27 +83,28 @@ $WORKSPACE/
 
 VLM scripts read these env vars (all optional, have sensible defaults):
 
-| Variable | Default | Description |
-|---|---|---|
-| `VLM_MODEL_PROFILE` | `strong` | `strong` or `weak` — controls prompts, batch sizes, merge strategy |
-| `VLM_ENDPOINT` | `http://localhost:1234/v1/chat/completions` | OpenAI-compatible VLM API endpoint |
-| `VLM_MODEL` | `qwen3.5-35b-a3b` | Model name sent in API request |
-| `VLM_API_KEY` | `lm-studio` | API key (LMStudio ignores this) |
-| `VLM_TIMEOUT` | `600` | Request timeout in seconds |
-| `VLM_MAX_TOKENS` | 131072 | Max output tokens (both profiles use 128k) |
-| `VLM_TEMPERATURE` | 0.6 | Sampling temperature (both profiles use 0.6) |
-| `VLM_RETRY_DELAY` | `120` | Seconds between retries |
-| `VLM_MERGE_IMAGE_WIDTH` | `1200` | Max image width for merge step (px) |
+| Variable                | Default                                     | Description                                                        |
+| ----------------------- | ------------------------------------------- | ------------------------------------------------------------------ |
+| `VLM_MODEL_PROFILE`     | `strong`                                    | `strong` or `weak` — controls prompts, batch sizes, merge strategy |
+| `VLM_ENDPOINT`          | `http://localhost:1234/v1/chat/completions` | OpenAI-compatible VLM API endpoint                                 |
+| `VLM_MODEL`             | `qwen3.5-122b-a10b`                         | Model name sent in API request                                     |
+| `VLM_API_KEY`           | `lm-studio`                                 | API key (LMStudio ignores this)                                    |
+| `VLM_TIMEOUT`           | `600`                                       | Request timeout in seconds                                         |
+| `VLM_MAX_TOKENS`        | 131072                                      | Max output tokens (both profiles use 128k)                         |
+| `VLM_TEMPERATURE`       | 0.6                                         | Sampling temperature (both profiles use 0.6)                       |
+| `VLM_RETRY_DELAY`       | `120`                                       | Seconds between retries                                            |
+| `VLM_MERGE_IMAGE_WIDTH` | `1200`                                      | Max image width for merge step (px)                                |
 
 ### Weak Model Quick Setup (e.g., Qwen 3.5 35B-A3B)
 
 ```bash
 export VLM_MODEL_PROFILE=weak
-export VLM_MODEL="qwen3.5-35b-a3b"       # or your model name
+export VLM_MODEL="qwen3.5-122b-a10b"       # or your model name
 export VLM_ENDPOINT="http://localhost:1234/v1/chat/completions"
 ```
 
 This automatically uses:
+
 - Simplified prompt with few-shot example (1856 chars vs 2780)
 - Batch size 2 (vs 8)
 - Temperature 0.3 (vs 0.6)
@@ -110,16 +115,16 @@ This automatically uses:
 
 ## Error Handling
 
-| Error | Action |
-|---|---|
-| Input file not found | Abort with message |
-| soffice not found (DOC input) | Abort — required for conversion |
-| pandoc not found (MD input) | Abort — required for conversion |
-| glmocr fails | Re-run with `--log-level DEBUG`. Check input image quality. |
-| VLM API unreachable | Check LMStudio is running. Scripts print FIX suggestions. |
-| dsl_to_docx.py fails | Read traceback. Fix XML in `dsl/page-{N}.xml`. Re-run B5. |
-| Translation mismatch | Auto-retry missing segments (max 3 retries in translation-prompt.md) |
-| Output DOCX is 0 bytes | Check dsl/ XML validity. Re-run B5. |
+| Error                         | Action                                                               |
+| ----------------------------- | -------------------------------------------------------------------- |
+| Input file not found          | Abort with message                                                   |
+| soffice not found (DOC input) | Abort — required for conversion                                      |
+| pandoc not found (MD input)   | Abort — required for conversion                                      |
+| glmocr fails                  | Re-run with `--log-level DEBUG`. Check input image quality.          |
+| VLM API unreachable           | Check LMStudio is running. Scripts print FIX suggestions.            |
+| dsl_to_docx.py fails          | Read traceback. Fix XML in `dsl/page-{N}.xml`. Re-run B5.            |
+| Translation mismatch          | Auto-retry missing segments (max 3 retries in translation-prompt.md) |
+| Output DOCX is 0 bytes        | Check dsl/ XML validity. Re-run B5.                                  |
 
 ### Structured Error Recovery
 

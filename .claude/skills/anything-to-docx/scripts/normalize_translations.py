@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """normalize_translations.py - Normalize variant batch translation formats to canonical form.
 
-Weak AI models (e.g., qwen3.5-35b-a3b) produce batch files in non-standard formats.
+Weak AI models (e.g., qwen3.5-122b-a10b) produce batch files in non-standard formats.
 This script normalizes all known variants into the canonical format expected by
 apply_dsl_translations.py:
 

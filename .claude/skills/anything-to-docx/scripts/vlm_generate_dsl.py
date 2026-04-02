@@ -42,7 +42,7 @@ from constants import (
 # VLM Configuration — override any value via environment variable
 # ---------------------------------------------------------------------------
 
-# Model profile: "strong" (default) or "weak" (for small models like Qwen3.5-35B-A3B)
+# Model profile: "strong" (default) or "weak" (for small models like Qwen3.5-122B-A10B)
 # Weak profile: simplified prompt, smaller defaults, more repair
 VLM_MODEL_PROFILE = os.environ.get("VLM_MODEL_PROFILE", "strong")
 
@@ -77,7 +77,7 @@ _PROFILE_DEFAULTS = {
     "weak": {
         "batch_size": VLM_PROFILE_WEAK_BATCH_SIZE,      # one page at a time to ensure complete coverage
         "max_tokens": VLM_DEFAULT_MAX_TOKENS,             # qwen3.5 supports 128k output
-        "temperature": VLM_DEFAULT_TEMPERATURE,            # qwen3.5 35b-a3b needs 0.6 for quality output
+        "temperature": VLM_DEFAULT_TEMPERATURE,            # qwen3.5 122b-a10b needs 0.6 for quality output
     },
 }
 

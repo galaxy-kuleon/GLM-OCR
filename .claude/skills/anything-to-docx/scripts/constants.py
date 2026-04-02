@@ -161,7 +161,7 @@ IMAGE_JPEG_QUALITY = 75
 # ===========================================================================
 
 # Default VLM model name
-VLM_DEFAULT_MODEL = "qwen3.5-35b-a3b"
+VLM_DEFAULT_MODEL = "qwen3.5-122b-a10b"
 
 # Default LMStudio-compatible endpoint
 VLM_DEFAULT_ENDPOINT = "http://localhost:1234/v1/chat/completions"
@@ -169,8 +169,8 @@ VLM_DEFAULT_ENDPOINT = "http://localhost:1234/v1/chat/completions"
 # Default API key (LMStudio ignores this but OpenAI-compat requires the header)
 VLM_DEFAULT_API_KEY = "lm-studio"
 
-# Request timeout in seconds (10 min — large batches need 3-5 min on consumer GPU)
-VLM_DEFAULT_TIMEOUT = 600
+# Request timeout in seconds (20 min — 122B model needs ~2-4 min/page on consumer GPU)
+VLM_DEFAULT_TIMEOUT = 1200
 
 # Maximum output tokens (Qwen3.5 supports up to 128K)
 VLM_DEFAULT_MAX_TOKENS = 131072
