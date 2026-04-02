@@ -128,7 +128,8 @@ for script in \
   "$SCRIPT_ROOT/anything-to-docx/scripts/normalize_translations.py" \
   "$SCRIPT_ROOT/image-to-docx/scripts/consolidate_ocr_results.py" \
   "$SCRIPT_ROOT/pdf-to-docx/scripts/dsl_to_docx.py" \
-  "$SCRIPT_ROOT/pdf-to-docx/scripts/verify_docx_visual.py"; do
+  "$SCRIPT_ROOT/pdf-to-docx/scripts/verify_docx_visual.py" \
+  "$SCRIPT_ROOT/anything-to-docx/scripts/parse_pdf_structure.py"; do
   test -f "$script" || { echo "MISSING: $script"; exit 1; }
 done
 
@@ -136,6 +137,8 @@ if [ "$INPUT_KIND" = "pdf" ]; then
   command -v pdftocairo >/dev/null || { echo "MISSING: pdftocairo (install poppler-utils)"; exit 1; }
   command -v pdfinfo >/dev/null || { echo "MISSING: pdfinfo (install poppler-utils)"; exit 1; }
   command -v pdftotext >/dev/null || { echo "MISSING: pdftotext (install poppler-utils)"; exit 1; }
+  command -v pdftohtml >/dev/null || { echo "MISSING: pdftohtml (install poppler-utils)"; exit 1; }
+  command -v pdfimages >/dev/null || { echo "MISSING: pdfimages (install poppler-utils)"; exit 1; }
 fi
 ```
 
@@ -280,6 +283,7 @@ Report: `$WORKSPACE/final-output.docx`. **Route A done. STOP here.**
 Use this route for `.pdf`, image files, or directories of images.
 
 **ALWAYS run every step B0 through B8 in order. Do NOT skip steps. Do NOT reuse data from previous runs.**
+**Digital PDFs (`IS_DIGITAL="True"`)** get EXTRA data (`--pdf-structure`) passed to B3 and B4, but ALL steps still run.
 
 ### Route B Checklist
 
@@ -288,10 +292,10 @@ Print this checklist now. After each step, reprint it with `[x]` and filled valu
 ```
 Route B Progress:
 - [ ] B0: VLM_PROFILE=___ (from .atd-env.sh)
-- [ ] B1: PAGE_COUNT=___
+- [ ] B1: PAGE_COUNT=___ IS_DIGITAL=___ (if digital: pdf-structure.json extracted)
 - [ ] B2: OCR pages=___ regions=___
-- [ ] B3: VLM XML count=___
-- [ ] B4: Merged XML count=___
+- [ ] B3: VLM DSL generated XML count=___ (digital: with --pdf-structure)
+- [ ] B4: Merged XML count=___ (digital: with --pdf-structure)
 - [ ] B5: output.docx size=___ bytes
 - [ ] B6: SKIP / DONE
 - [ ] B7: SKIP / DONE
@@ -339,6 +343,33 @@ uv run .claude/skills/anything-to-docx/scripts/create_pdf_image_info.py \
 echo "export PAGE_COUNT=\"$PAGE_COUNT\"" >> .atd-env.sh
 echo "Page count: $PAGE_COUNT"
 ```
+
+**Digital PDF detection (PDF inputs only):**
+
+After the above block completes, run this block to detect whether the PDF is digital (has real text/fonts) or scanned:
+
+```bash
+source .atd-env.sh
+IS_DIGITAL=$(uv run .claude/skills/anything-to-docx/scripts/parse_pdf_structure.py \
+  --check-digital "$INPUT_PATH" | python3 -c "import sys,json; print(json.load(sys.stdin)['is_digital'])" 2>/dev/null) || true
+if [ -z "$IS_DIGITAL" ]; then
+  echo "WARNING: Digital detection failed, defaulting to False (scanned PDF path)"
+  IS_DIGITAL="False"
+fi
+echo "export IS_DIGITAL=\"$IS_DIGITAL\"" >> .atd-env.sh
+echo "Digital PDF: $IS_DIGITAL"
+```
+
+**If `IS_DIGITAL="True"` — extract full poppler structure for B3/B4:**
+
+```bash
+source .atd-env.sh
+uv run .claude/skills/anything-to-docx/scripts/parse_pdf_structure.py \
+  --pdf "$INPUT_PATH" --output "$WORKSPACE/pdf-structure.json"
+echo "Digital PDF structure extracted to $WORKSPACE/pdf-structure.json"
+```
+
+**If `IS_DIGITAL="False"`:** Skip this block — no pdf-structure needed for scanned PDFs.
 
 **If input is image file(s) or a directory:**
 
@@ -388,7 +419,9 @@ uv run --with Pillow \
 
 PAGE_COUNT=$(python3 -c "import json; print(json.load(open('$WORKSPACE/image-info.json'))['page_count'])")
 echo "export PAGE_COUNT=\"$PAGE_COUNT\"" >> .atd-env.sh
+echo "export IS_DIGITAL=\"False\"" >> .atd-env.sh
 echo "Page count: $PAGE_COUNT"
+echo "IS_DIGITAL=False (image input — always scanned path)"
 ```
 
 **Verify B1:**
@@ -398,6 +431,8 @@ uv run .claude/skills/shared/verify_step.py --step B1 --workspace "$WORKSPACE"
 ```
 
 ### B2: Run glm-ocr
+
+**ALWAYS run OCR for all inputs — digital or scanned. Do NOT skip this step.**
 
 **If input was a PDF:**
 ```bash
@@ -428,13 +463,27 @@ source .atd-env.sh
 uv run .claude/skills/shared/verify_step.py --step B2 --workspace "$WORKSPACE"
 ```
 
-### B3: VLM Generate XML DSL
+### B3: Generate XML DSL
+
+**ALWAYS run VLM for all inputs — digital or scanned. Do NOT skip this step.**
 
 **IMPORTANT: This command is SLOW** (1-5 minutes depending on page count). **Set your bash timeout to at least 600 seconds** — for example: `timeout 600 uv run ...`, or configure your agent's bash timeout setting. Do NOT interrupt or retry early. The script prints `[VLM] Page N/M complete` progress lines as proof of forward progress — as long as these appear, the process is working.
 
 This script saves each page incrementally. If interrupted, re-run the same command and it will skip pages that already have valid XML in `dsl-vlm/`, regenerating only the missing ones.
 
-Run this exact command. The script handles batch size and prompt selection based on `$VLM_PROFILE`.
+**Check IS_DIGITAL in `.atd-env.sh`. Run ONLY the block matching your IS_DIGITAL value.**
+
+**If `IS_DIGITAL="True"` (Digital PDF — VLM enhanced with poppler reference text):**
+
+```bash
+source .atd-env.sh
+uv run --with requests,Pillow,lxml \
+  .claude/skills/anything-to-docx/scripts/vlm_generate_dsl.py \
+  --workspace "$WORKSPACE" --pages "$PAGE_COUNT" --model-profile "$VLM_PROFILE" \
+  --pdf-structure "$WORKSPACE/pdf-structure.json"
+```
+
+**If `IS_DIGITAL="False"` (Scanned PDF or images — VLM without poppler):**
 
 ```bash
 source .atd-env.sh
@@ -453,9 +502,20 @@ uv run .claude/skills/shared/verify_step.py --step B3 --workspace "$WORKSPACE"
 
 ### B4: Merge
 
-Check `VLM_PROFILE` in `.atd-env.sh`. Run ONLY the block matching your profile.
+**ALWAYS run merge for all inputs — digital or scanned. Do NOT skip this step.**
 
-**If `VLM_PROFILE="weak"`** (this is the default for local models):
+Check `VLM_PROFILE` and `IS_DIGITAL` in `.atd-env.sh`. Run ONLY the block matching your combination.
+
+**If `VLM_PROFILE="weak"` AND `IS_DIGITAL="True"` (digital PDF with poppler enhancement):**
+```bash
+source .atd-env.sh
+uv run --with lxml,Pillow \
+  .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
+  --workspace "$WORKSPACE" --pages "$PAGE_COUNT" \
+  --pdf-structure "$WORKSPACE/pdf-structure.json"
+```
+
+**If `VLM_PROFILE="weak"` AND `IS_DIGITAL="False"` (scanned PDF or images):**
 ```bash
 source .atd-env.sh
 uv run --with lxml,Pillow \
@@ -463,7 +523,7 @@ uv run --with lxml,Pillow \
   --workspace "$WORKSPACE" --pages "$PAGE_COUNT"
 ```
 
-**If `VLM_PROFILE="strong"`:**
+**If `VLM_PROFILE="strong"`** (any IS_DIGITAL value):
 ```bash
 source .atd-env.sh
 uv run --with requests,Pillow,lxml \

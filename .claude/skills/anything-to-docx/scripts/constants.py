@@ -111,6 +111,20 @@ MERGE_HEADING_FONT_SIZES = {
 MERGE_DEFAULT_FONT_SIZE_PT = "11"
 
 # ===========================================================================
+# MERGE: Poppler integration (digital PDF enhancement)
+# ===========================================================================
+
+# Minimum text similarity for accepting a poppler paragraph match
+MERGE_POPPLER_MATCH_THRESHOLD = 0.3
+
+# Poppler heading level determination by font size (pts)
+# >18pt → H1, >=14pt → H2, >=12pt → H3, >=11pt+bold → H4
+MERGE_POPPLER_H1_MIN_PTS = 18.0
+MERGE_POPPLER_H2_MIN_PTS = 14.0
+MERGE_POPPLER_H3_MIN_PTS = 12.0
+MERGE_POPPLER_H4_MIN_PTS = 11.0  # only if bold
+
+# ===========================================================================
 # PAGE: Default page dimensions and margins
 # ===========================================================================
 

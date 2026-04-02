@@ -7,6 +7,10 @@ Deterministic text replacement merge for weak VLM models:
 3. Resolve image paths from OCR cropped images
 4. Clean OCR artifacts at merge time
 
+When --pdf-structure is provided (digital PDFs), adds poppler as a third
+data source with priority: poppler text > OCR text > VLM text.
+Poppler also provides exact font size, color, bold/italic styling.
+
 Designed as a drop-in alternative to vlm_merge_dsl.py when the VLM
 is too weak to perform the merge step reliably.
 
@@ -14,6 +18,12 @@ Usage:
     uv run --with lxml \
         .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
         --workspace /path/to/workspace --pages 10
+
+    # With poppler enhancement (digital PDFs):
+    uv run --with lxml \
+        .claude/skills/anything-to-docx/scripts/deterministic_merge.py \
+        --workspace /path/to/workspace --pages 10 \
+        --pdf-structure /path/to/pdf-structure.json
 """
 
 import argparse
@@ -42,6 +52,11 @@ from constants import (
     MERGE_LONG_TEXT_CHAR_WEIGHT,
     MERGE_LONG_TEXT_WORD_WEIGHT,
     MERGE_LOOK_AROUND,
+    MERGE_POPPLER_H1_MIN_PTS,
+    MERGE_POPPLER_H2_MIN_PTS,
+    MERGE_POPPLER_H3_MIN_PTS,
+    MERGE_POPPLER_H4_MIN_PTS,
+    MERGE_POPPLER_MATCH_THRESHOLD,
     MERGE_PROXIMITY_BONUS_PER_UNIT,
     MERGE_PROXIMITY_DISTANCE,
     MERGE_QUALITY_GATE_MATCH_RATE,
@@ -255,6 +270,178 @@ def _dedup_image_regions(image_regions):
 
 
 # ---------------------------------------------------------------------------
+# Poppler data loading and matching (digital PDF enhancement)
+# ---------------------------------------------------------------------------
+
+
+def load_poppler_data(pdf_structure_path):
+    """Load parsed PDF structure JSON from file.
+
+    Returns the full dict from parse_digital_pdf(), or None if path is
+    missing/invalid. Pure function: path in → data out (or None).
+    """
+    json_path = Path(pdf_structure_path)
+    if not json_path.exists():
+        print(f"Warning: --pdf-structure file not found: {pdf_structure_path}",
+              file=sys.stderr)
+        return None
+    try:
+        raw = json_path.read_text(encoding="utf-8")
+        return json.loads(raw)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: Cannot read --pdf-structure: {e}", file=sys.stderr)
+        return None
+
+
+def build_poppler_page_lookup(poppler_data):
+    """Build a per-page lookup of poppler paragraphs from parse_digital_pdf() output.
+
+    Returns dict: page_number (1-indexed) → list of paragraph dicts.
+    Only includes paragraphs with non-empty text that are NOT table cells.
+    Paragraphs are sorted by (top, left) for stable iteration.
+    Pure function: data in → lookup out.
+    """
+    if not poppler_data or not isinstance(poppler_data, dict):
+        return {}
+    pages = poppler_data.get("pages", [])
+    lookup = {}
+    for page in pages:
+        page_num = page.get("number", 0)
+        paras = page.get("paragraphs", [])
+        # Filter: non-empty text, not table cells
+        filtered = [
+            p for p in paras
+            if p.get("text", "").strip()
+            and not p.get("is_table_cell", False)
+        ]
+        # Sort by vertical then horizontal position for stable ordering
+        filtered.sort(key=lambda p: (p.get("top", 0), p.get("left", 0)))
+        if filtered:
+            lookup[page_num] = filtered
+    return lookup
+
+
+def _match_poppler_paragraph(vlm_text, poppler_paras, consumed):
+    """Find the best matching poppler paragraph for a VLM text element.
+
+    Uses text similarity (same combined_similarity as OCR matching).
+    consumed: set of indices already matched (prevents double-assignment).
+
+    Returns (best_index, best_score, best_para) or (-1, 0.0, None) if no match.
+    Pure function (reads consumed, does not modify it).
+    """
+    if not vlm_text or not poppler_paras:
+        return -1, 0.0, None
+
+    best_idx = -1
+    best_score = 0.0
+    best_para = None
+
+    for i, para in enumerate(poppler_paras):
+        if i in consumed:
+            continue
+        sim = combined_similarity(vlm_text, para.get("text", ""))
+        if sim > best_score:
+            best_score = sim
+            best_idx = i
+            best_para = para
+
+    if best_score >= MERGE_POPPLER_MATCH_THRESHOLD:
+        return best_idx, best_score, best_para
+    return -1, 0.0, None
+
+
+def heading_level_from_poppler(font_size_pts, is_bold):
+    """Determine heading level from poppler font size and bold status.
+
+    Mapping:
+        >18pt → H1
+        >=14pt → H2
+        >=12pt → H3
+        >=11pt AND bold → H4
+        otherwise → 0 (not a heading)
+
+    Pure function.
+    """
+    if not font_size_pts or font_size_pts <= 0:
+        return 0
+    if font_size_pts > MERGE_POPPLER_H1_MIN_PTS:
+        return 1
+    if font_size_pts >= MERGE_POPPLER_H2_MIN_PTS:
+        return 2
+    if font_size_pts >= MERGE_POPPLER_H3_MIN_PTS:
+        return 3
+    if font_size_pts >= MERGE_POPPLER_H4_MIN_PTS and is_bold:
+        return 4
+    return 0
+
+
+def _apply_poppler_styling(elem, poppler_para):
+    """Apply font styling from a poppler paragraph to a VLM XML element.
+
+    Sets on first <run> child (or all runs):
+    - font-size-pt from poppler font_size_pts
+    - bold from poppler bold
+    - italic from poppler italic
+    - color-rgb from poppler color (hex → R,G,B; skip black/white)
+
+    Modifies elem in place. Returns count of attributes set.
+    """
+    runs = elem.findall("run")
+    if not runs:
+        return 0
+
+    attrs_set = 0
+    font_size = poppler_para.get("font_size_pts")
+    is_bold = poppler_para.get("bold", False)
+    is_italic = poppler_para.get("italic", False)
+    color = poppler_para.get("color", "")
+
+    for run in runs:
+        # Font size
+        if font_size and font_size > 0:
+            run.set("font-size-pt", str(round(font_size, 1)))
+            attrs_set += 1
+
+        # Bold
+        if is_bold:
+            run.set("bold", "true")
+            attrs_set += 1
+        else:
+            # Only clear bold if poppler explicitly says not bold
+            if run.get("bold") == "true":
+                run.attrib.pop("bold", None)
+                attrs_set += 1
+
+        # Italic
+        if is_italic:
+            run.set("italic", "true")
+            attrs_set += 1
+        else:
+            if run.get("italic") == "true":
+                run.attrib.pop("italic", None)
+                attrs_set += 1
+
+        # Color (hex → R,G,B; skip black #000000 and white #ffffff)
+        if color and color.startswith("#") and len(color) == 7:
+            color_lower = color.lower()
+            if color_lower not in ("#000000", "#ffffff"):
+                try:
+                    r = int(color[1:3], 16)
+                    g = int(color[3:5], 16)
+                    b = int(color[5:7], 16)
+                    run.set("color-rgb", f"{r},{g},{b}")
+                    attrs_set += 1
+                except ValueError:
+                    pass
+            else:
+                # Remove color-rgb if poppler says it's black (default)
+                run.attrib.pop("color-rgb", None)
+
+    return attrs_set
+
+
+# ---------------------------------------------------------------------------
 # VLM XML element collection
 # ---------------------------------------------------------------------------
 
@@ -365,10 +552,12 @@ def _replace_element_text(elem, new_text):
         elem.text = new_text
 
 
-def match_and_replace_text(page_el, ocr_regions, page_num):
+def match_and_replace_text(page_el, ocr_regions, page_num, poppler_paras=None):
     """Match OCR text regions to VLM text elements and replace.
 
     Uses greedy sequential matching with a look-ahead window.
+    When poppler_paras is provided (digital PDF), tries poppler match first:
+    priority is poppler text > OCR text > VLM text.
     Modifies page_el in place.
 
     Returns (replaced_count, total_vlm_elements, unmatched_ocr_regions).
@@ -407,6 +596,10 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
     if not vlm_elements or not text_regions:
         return 0, len(vlm_elements), []
 
+    # Poppler matching state (when digital PDF data available)
+    poppler_consumed = set()
+    poppler_matched_count = 0
+
     # Greedy sequential matching with symmetric look-around
     consumed = set()
     ocr_cursor = 0
@@ -417,6 +610,38 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
         if not vlm_text.strip():
             continue
 
+        # ── Poppler-first path (digital PDF enhancement) ──
+        # Try poppler match before OCR. Poppler text is exact (zero errors).
+        if poppler_paras:
+            p_idx, p_score, p_para = _match_poppler_paragraph(
+                vlm_text, poppler_paras, poppler_consumed)
+            if p_idx >= 0 and p_para:
+                # Use poppler's exact text
+                _replace_element_text(ve["element"], p_para["text"])
+                # Apply font styling from poppler
+                _apply_poppler_styling(ve["element"], p_para)
+                # Override heading level from poppler font size
+                p_font_size = p_para.get("font_size_pts", 0)
+                p_bold = p_para.get("bold", False)
+                p_hlevel = heading_level_from_poppler(p_font_size, p_bold)
+                if p_hlevel > 0 and ve["type"] == "heading":
+                    ve["element"].set("level", str(p_hlevel))
+                poppler_consumed.add(p_idx)
+                poppler_matched_count += 1
+                replaced += 1
+                # Still consume the matching OCR region to keep cursor aligned
+                # (prevents OCR from being gap-filled for already-replaced elements)
+                for i, ocr_r in enumerate(text_regions):
+                    if i in consumed:
+                        continue
+                    if combined_similarity(p_para["text"], ocr_r["content"]) > MERGE_ACCEPT_THRESHOLD:
+                        consumed.add(i)
+                        if i >= ocr_cursor:
+                            ocr_cursor = i + 1
+                        break
+                continue
+
+        # ── OCR path (existing behavior) ──
         best_score = 0.0
         best_idx = -1
 
@@ -472,6 +697,9 @@ def match_and_replace_text(page_el, ocr_regions, page_num):
             ocr_cursor = best_idx + 1
             replaced += 1
 
+    if poppler_matched_count:
+        print(f"  Page {page_num}: {poppler_matched_count} elements matched via poppler (exact text)")
+
     # Collect unmatched OCR text regions
     unmatched = [text_regions[i] for i in range(len(text_regions)) if i not in consumed]
     return replaced, len(vlm_elements), unmatched
@@ -486,13 +714,39 @@ def _append_gap_elements(page_el, unmatched_regions):
     """Append unmatched OCR text regions as new elements at end of page.
 
     Only appends regions with substantial content (>5 chars) to avoid noise.
+    Skips regions whose text already exists in the page (dedup against
+    poppler-matched or VLM-retained elements to prevent duplicates).
     Creates heading or paragraph elements based on OCR heading_level.
     """
+    # Build set of existing text on the page for dedup
+    existing_texts = set()
+    for elem in page_el.iter():
+        if elem.tag in ("heading", "paragraph"):
+            runs = elem.findall("run")
+            if runs:
+                text = " ".join((r.text or "") for r in runs).strip()
+            else:
+                text = (elem.text or "").strip()
+            if text:
+                existing_texts.add(text)
+
     added = 0
     for region in unmatched_regions:
         content = region["content"]
         if len(content) <= MERGE_GAP_MIN_CHARS:
             continue
+        # Skip if this text (or very similar) already exists on the page
+        if content in existing_texts:
+            continue
+        # Also check similarity — poppler text may differ slightly from OCR text
+        skip = False
+        for existing in existing_texts:
+            if combined_similarity(content, existing) > MERGE_DUPLICATE_SIMILARITY:
+                skip = True
+                break
+        if skip:
+            continue
+
         hlevel = region.get("heading_level", 0)
         if hlevel > 0:
             elem = etree.SubElement(page_el, "heading",
@@ -505,6 +759,7 @@ def _append_gap_elements(page_el, unmatched_regions):
             run = etree.SubElement(elem, "run",
                                    attrib={"font-size-pt": MERGE_DEFAULT_FONT_SIZE_PT})
         run.text = content
+        existing_texts.add(content)  # prevent further dupes within gap regions
         added += 1
     return added
 
@@ -954,6 +1209,215 @@ def _clean_vlm_xml_artifacts(page_el):
                 elem.text = cleaned if cleaned else None
 
 
+def _reorder_by_poppler_position(page_el, poppler_paras):
+    """Reorder page elements using poppler's exact vertical positions.
+
+    For digital PDFs, poppler knows the exact (top, left) of every text element.
+    VLM often misordering elements (e.g., putting list item 4 before the title).
+    This function corrects the ordering deterministically.
+
+    Algorithm:
+    1. For each child element of <page>, try to match its text to a poppler paragraph
+    2. Assign the poppler paragraph's top_pts as the sort key
+    3. Elements without a poppler match keep a sort key based on their current position
+    4. Sort all children by (sort_key, original_index) for stable ordering
+
+    Only reorders direct children of <page> (headings, paragraphs, tables, images).
+    Does NOT reorder cells within tables.
+
+    Returns count of elements whose position changed.
+    """
+    children = list(page_el)
+    if len(children) <= 1:
+        return 0
+
+    # Build poppler text → position lookup
+    poppler_by_text = {}
+    for para in poppler_paras:
+        text = para.get("text", "").strip()
+        if text:
+            # Use first 100 chars as key (sufficient for matching)
+            key = text[:100]
+            top_px = para.get("top", 0)
+            poppler_by_text[key] = top_px
+
+    # Assign sort keys to each child
+    sort_entries = []  # (sort_key, original_index, element)
+    for i, child in enumerate(children):
+        sort_key = None
+
+        # Try to match element text to poppler
+        tag = child.tag
+        if tag in ("heading", "paragraph"):
+            # Get text from run elements
+            runs = child.findall("run")
+            if runs:
+                elem_text = " ".join(r.text or "" for r in runs).strip()
+            else:
+                elem_text = (child.text or "").strip()
+
+            if elem_text:
+                # Try exact prefix match (first 100 chars)
+                key = elem_text[:100]
+                if key in poppler_by_text:
+                    sort_key = poppler_by_text[key]
+                else:
+                    # Try similarity match for imperfect VLM text
+                    best_match_top = None
+                    best_sim = 0
+                    for p_key, p_top in poppler_by_text.items():
+                        sim = combined_similarity(elem_text, p_key)
+                        if sim > best_sim and sim > 0.4:
+                            best_sim = sim
+                            best_match_top = p_top
+                    if best_match_top is not None:
+                        sort_key = best_match_top
+
+        elif tag == "table":
+            # Use table bbox top as sort key
+            bbox_str = child.get("bbox", "")
+            if bbox_str:
+                parts = bbox_str.split(",")
+                if len(parts) >= 2:
+                    try:
+                        # bbox is normalized 0-1000; map back to px approx
+                        sort_key = float(parts[1]) * 1.2  # rough approx
+                    except ValueError:
+                        pass
+
+        elif tag == "image":
+            bbox_str = child.get("bbox", "")
+            if bbox_str:
+                parts = bbox_str.split(",")
+                if len(parts) >= 2:
+                    try:
+                        sort_key = float(parts[1]) * 1.2
+                    except ValueError:
+                        pass
+
+        # Fallback: use a large number to keep at current relative position
+        if sort_key is None:
+            sort_key = 10000 + i
+
+        sort_entries.append((sort_key, i, child))
+
+    # Sort by (sort_key, original_index) for stability
+    sort_entries.sort(key=lambda x: (x[0], x[1]))
+
+    # Check how many elements changed position
+    new_order = [e[2] for e in sort_entries]
+    changes = sum(1 for a, b in zip(children, new_order) if a is not b)
+
+    if changes == 0:
+        return 0
+
+    # Rebuild page element with new order
+    for child in children:
+        page_el.remove(child)
+    for child in new_order:
+        page_el.append(child)
+
+    return changes
+
+
+def _reorder_by_ocr_position(page_el, ocr_regions):
+    """Reorder page elements using OCR bbox_2d vertical positions.
+
+    For non-digital PDFs (no poppler data), OCR regions have precise bbox_2d
+    coordinates from layout detection. Use these to fix VLM element ordering.
+
+    Algorithm:
+    1. For each child element of <page>, match its text to an OCR region
+    2. Use the OCR region's bbox_2d[1] (y1, top) as sort key
+    3. Elements without an OCR match keep their current relative position
+    4. Sort all children by (sort_key, original_index)
+
+    Returns count of elements whose position changed.
+    """
+    children = list(page_el)
+    if len(children) <= 1 or not ocr_regions:
+        return 0
+
+    # Build OCR text → y1 position lookup
+    ocr_by_text = {}
+    for region in ocr_regions:
+        content = (region.get("content", "") or "").strip()
+        bbox = region.get("bbox_2d", [])
+        if content and len(bbox) >= 2:
+            # Use first 100 chars as key
+            key = content[:100]
+            ocr_by_text[key] = bbox[1]  # y1 (top position, 0-1000 normalized)
+
+    # Assign sort keys
+    sort_entries = []
+    for i, child in enumerate(children):
+        sort_key = None
+        tag = child.tag
+
+        if tag in ("heading", "paragraph"):
+            runs = child.findall("run")
+            if runs:
+                elem_text = " ".join((r.text or "") for r in runs).strip()
+            else:
+                elem_text = (child.text or "").strip()
+
+            if elem_text:
+                key = elem_text[:100]
+                if key in ocr_by_text:
+                    sort_key = ocr_by_text[key]
+                else:
+                    # Similarity match for imperfect VLM text
+                    best_y = None
+                    best_sim = 0
+                    for o_key, o_y in ocr_by_text.items():
+                        sim = combined_similarity(elem_text, o_key)
+                        if sim > best_sim and sim > 0.4:
+                            best_sim = sim
+                            best_y = o_y
+                    if best_y is not None:
+                        sort_key = best_y
+
+        elif tag == "table":
+            bbox_str = child.get("bbox", "")
+            if bbox_str:
+                parts = bbox_str.split(",")
+                if len(parts) >= 2:
+                    try:
+                        sort_key = float(parts[1])  # already 0-1000 normalized
+                    except ValueError:
+                        pass
+
+        elif tag == "image":
+            bbox_str = child.get("bbox", "")
+            if bbox_str:
+                parts = bbox_str.split(",")
+                if len(parts) >= 2:
+                    try:
+                        sort_key = float(parts[1])
+                    except ValueError:
+                        pass
+
+        if sort_key is None:
+            sort_key = 10000 + i
+
+        sort_entries.append((sort_key, i, child))
+
+    sort_entries.sort(key=lambda x: (x[0], x[1]))
+
+    new_order = [e[2] for e in sort_entries]
+    changes = sum(1 for a, b in zip(children, new_order) if a is not b)
+
+    if changes == 0:
+        return 0
+
+    for child in children:
+        page_el.remove(child)
+    for child in new_order:
+        page_el.append(child)
+
+    return changes
+
+
 def _cleanup_placeholder_images(page_el):
     """Remove all <image> elements with unresolved PLACEHOLDER/empty src.
 
@@ -1102,13 +1566,17 @@ def _dedup_consecutive_elements(page_el):
 # ---------------------------------------------------------------------------
 
 
-def merge_page(workspace, page_num, ocr_data, pdf_images_map=None):
+def merge_page(workspace, page_num, ocr_data, pdf_images_map=None,
+               poppler_page_lookup=None):
     """Merge a single page deterministically.
 
     Args:
         workspace: workspace directory path
         page_num: 1-based page number
         ocr_data: full OCR data (list of page lists, 0-indexed)
+        pdf_images_map: dict from _build_pdf_images_map(), or None
+        poppler_page_lookup: dict from build_poppler_page_lookup(), or None.
+            When provided (digital PDF), poppler text/styling enhances merge.
 
     Returns:
         XML string of merged page, or None on failure.
@@ -1151,8 +1619,12 @@ def merge_page(workspace, page_num, ocr_data, pdf_images_map=None):
             print(f"  Page {page_num}: removed {ph_removed} unresolved placeholder images")
         return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
+    # Get poppler paragraphs for this page (if available)
+    poppler_paras = (poppler_page_lookup or {}).get(page_num)
+
     # Step 1: Replace text in headings/paragraphs
-    replaced, total, unmatched = match_and_replace_text(page_el, ocr_regions, page_num)
+    replaced, total, unmatched = match_and_replace_text(
+        page_el, ocr_regions, page_num, poppler_paras=poppler_paras)
     print(f"  Page {page_num}: replaced {replaced}/{total} text elements")
 
     # Quality gate: if VLM match rate is very low, OCR-only page is likely better
@@ -1201,6 +1673,17 @@ def merge_page(workspace, page_num, ocr_data, pdf_images_map=None):
     if placeholder_removed:
         print(f"  Page {page_num}: removed {placeholder_removed} unresolved placeholder images")
 
+    # Step 7: Reorder elements using precise position data
+    # VLM often misordering elements — use poppler or OCR positions to fix
+    if poppler_paras:
+        reordered = _reorder_by_poppler_position(page_el, poppler_paras)
+        if reordered:
+            print(f"  Page {page_num}: reordered {reordered} elements by poppler position")
+    elif ocr_regions:
+        reordered = _reorder_by_ocr_position(page_el, ocr_regions)
+        if reordered:
+            print(f"  Page {page_num}: reordered {reordered} elements by OCR position")
+
     return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
 
@@ -1234,6 +1717,9 @@ def main():
                         help="Workspace directory path")
     parser.add_argument("--pages", required=True, type=int,
                         help="Total page count")
+    parser.add_argument("--pdf-structure", type=str, default=None,
+                        help="Path to JSON output of parse_pdf_structure.py (digital PDF). "
+                             "When provided, uses exact poppler text/styling to enhance merge.")
     args = parser.parse_args()
 
     workspace = args.workspace
@@ -1253,11 +1739,22 @@ def main():
         total_pdf = sum(len(v) for v in pdf_images_map.values())
         print(f"PDF images: {total_pdf} content images across {len(pdf_images_map)} pages")
 
+    # Load poppler data when --pdf-structure is provided (digital PDFs)
+    poppler_page_lookup = None
+    if args.pdf_structure:
+        poppler_data = load_poppler_data(args.pdf_structure)
+        if poppler_data:
+            poppler_page_lookup = build_poppler_page_lookup(poppler_data)
+            total_paras = sum(len(v) for v in poppler_page_lookup.values())
+            print(f"Poppler data: {total_paras} paragraphs across "
+                  f"{len(poppler_page_lookup)} pages (digital PDF enhancement)")
+
     # Process each page
     success_count = 0
     for page_num in range(1, total_pages + 1):
         merged_xml = merge_page(workspace, page_num, ocr_data,
-                                pdf_images_map=pdf_images_map)
+                                pdf_images_map=pdf_images_map,
+                                poppler_page_lookup=poppler_page_lookup)
 
         if merged_xml:
             out_path = output_dir / f"page-{page_num}.xml"

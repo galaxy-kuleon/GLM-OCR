@@ -18,6 +18,7 @@ import os
 import re
 import sys
 import time
+from pathlib import Path
 
 import requests
 from lxml import etree
@@ -138,7 +139,7 @@ Rules:
 11. Output ONLY valid XML. No explanations, no markdown code fences."""
 
 # Simplified prompt for weak VLMs (fewer rules, focus on essentials)
-SYSTEM_PROMPT_WEAK = """\
+_SYSTEM_PROMPT_WEAK_RULES = """\
 Convert each page image to XML. Output ONLY valid XML, no explanations.
 
 Schema:
@@ -159,7 +160,14 @@ Rules:
 3. Body text: 10-12pt. Headings: 14-24pt.
 4. Tables: estimate column width ratios (sum to 1.0).
 5. Wrap each page in <page number="N"> tags.
-6. Multiple pages: wrap all in <pages>...</pages>.
+6. Multiple pages: wrap all in <pages>...</pages>."""
+
+# Additional rules injected into the Rules section when poppler reference text is available
+_REFERENCE_TEXT_RULES_WEAK = """
+7. When EXACT PDF STRUCTURE is provided, use that text verbatim. Do NOT OCR from image.
+8. Focus on layout: element ordering, table structure, alignment, heading levels."""
+
+_SYSTEM_PROMPT_WEAK_EXAMPLE = """
 
 Example for a page with a title, paragraph, and table:
 
@@ -175,12 +183,32 @@ Example for a page with a title, paragraph, and table:
 </page>
 </pages>"""
 
+# Composed: rules + example (no references)
+SYSTEM_PROMPT_WEAK = _SYSTEM_PROMPT_WEAK_RULES + _SYSTEM_PROMPT_WEAK_EXAMPLE
 
-def get_system_prompt():
-    """Return the appropriate system prompt based on model profile."""
+# Additional rules for the strong prompt when reference text is available
+_REFERENCE_TEXT_RULES_STRONG = """
+12. When EXACT PDF STRUCTURE is provided for a page, use the text content verbatim — do NOT re-OCR from the image.
+13. Focus on layout detection: element types, ordering, table structure, alignment, heading levels, and image placement."""
+
+
+def get_system_prompt(has_references=False):
+    """Return the appropriate system prompt based on model profile.
+
+    When has_references is True, appends rules about using poppler reference text.
+    Pure function of profile + flag.
+    """
     if VLM_MODEL_PROFILE == "weak":
+        if has_references:
+            # Inject reference rules between Rules section and Example
+            return (_SYSTEM_PROMPT_WEAK_RULES
+                    + _REFERENCE_TEXT_RULES_WEAK
+                    + _SYSTEM_PROMPT_WEAK_EXAMPLE)
         return SYSTEM_PROMPT_WEAK
-    return SYSTEM_PROMPT_STRONG
+    prompt = SYSTEM_PROMPT_STRONG
+    if has_references:
+        prompt += _REFERENCE_TEXT_RULES_STRONG
+    return prompt
 
 
 # Back-compat alias
@@ -190,6 +218,35 @@ SYSTEM_PROMPT = SYSTEM_PROMPT_STRONG
 # ---------------------------------------------------------------------------
 # Pure functions
 # ---------------------------------------------------------------------------
+
+
+def load_poppler_references(pdf_structure_path: str) -> dict[int, str]:
+    """Load poppler PDF structure JSON and format into per-page reference text.
+
+    Returns dict mapping page number (1-indexed) to formatted reference string.
+    Pure function: path in → data out.
+    """
+    json_path = Path(pdf_structure_path)
+    if not json_path.exists():
+        print(f"ERROR: --pdf-structure file not found: {pdf_structure_path}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    raw_text = json_path.read_text(encoding="utf-8")
+    try:
+        parsed_data = json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Malformed JSON in --pdf-structure file {pdf_structure_path}: {e}",
+              file=sys.stderr)
+        sys.exit(1)
+
+    # Import format_all_pages from sibling module (lazy — only when needed)
+    script_dir = Path(__file__).parent
+    if str(script_dir) not in sys.path:
+        sys.path.insert(0, str(script_dir))
+    from format_poppler_reference import format_all_pages  # noqa: E402
+
+    return format_all_pages(parsed_data)
 
 
 def load_image_info(workspace):
@@ -287,14 +344,36 @@ def build_user_prompt(start, end, dimensions_text):
     )
 
 
-def build_image_content_items(workspace, start, end):
-    """Build the list of image_url content items for the API message.
+def _build_reference_instruction(reference_text: str) -> str:
+    """Build the reference text injection block for a single page.
+
+    Combines the formatted reference text (which already includes the
+    [EXACT PDF STRUCTURE — Page N] header) with usage instructions.
+    Pure function: data in → string out.
+    """
+    return (
+        f"{reference_text}\n\n"
+        f"Use the EXACT text content above. Focus on LAYOUT STRUCTURE:\n"
+        f"- Which elements are headings vs paragraphs\n"
+        f"- Table structure (rows, columns, cell grouping)\n"
+        f"- Element ordering (top to bottom)\n"
+        f"- Alignment (left, center, right, justify)\n"
+        f"- Image placement\n"
+        f"Do NOT guess or modify the text content — use it exactly as provided."
+    )
+
+
+def build_image_content_items(workspace, start, end, per_page_references=None):
+    """Build the list of image_url and reference text content items.
 
     Returns a list of dicts suitable for the 'content' array in the
     OpenAI-compatible messages format.
 
     For weak profiles, also includes layout visualization images from
     glm-ocr (colored bounding boxes with region labels) when available.
+
+    When per_page_references is provided (dict mapping page number to
+    formatted text), injects reference text after each page's images.
     """
     items = []
     # Weak models get resized page images (1024px wide) to reduce inference time.
@@ -333,19 +412,38 @@ def build_image_content_items(workspace, start, end):
                         "url": f"data:image/jpeg;base64,{b64_layout}",
                     },
                 })
+
+        # Poppler reference text (when available for this page)
+        if per_page_references and n in per_page_references:
+            ref_text = per_page_references[n]
+            if ref_text.strip():
+                items.append({
+                    "type": "text",
+                    "text": _build_reference_instruction(ref_text),
+                })
+
     return items
 
 
-def build_messages(workspace, image_info, start, end):
-    """Build the full messages array for the VLM API call."""
+def build_messages(workspace, image_info, start, end, per_page_references=None):
+    """Build the full messages array for the VLM API call.
+
+    per_page_references: optional dict mapping page number to formatted
+    poppler reference text. When provided, reference text is interleaved
+    with images and system prompt gets reference-text rules.
+    """
     dimensions_text = build_page_dimensions_text(image_info, start, end)
     user_text = build_user_prompt(start, end, dimensions_text)
 
-    image_items = build_image_content_items(workspace, start, end)
-    user_content = [{"type": "text", "text": user_text}] + image_items
+    content_items = build_image_content_items(
+        workspace, start, end, per_page_references=per_page_references,
+    )
+    user_content = [{"type": "text", "text": user_text}] + content_items
+
+    has_references = per_page_references is not None and len(per_page_references) > 0
 
     return [
-        {"role": "system", "content": get_system_prompt()},
+        {"role": "system", "content": get_system_prompt(has_references=has_references)},
         {"role": "user", "content": user_content},
     ]
 
@@ -604,18 +702,24 @@ def save_raw_response(raw_text, workspace, batch_index):
 
 
 def process_batch(workspace, image_info, start, end, batch_index, total_batches,
-                   total_pages):
+                   total_pages, per_page_references=None):
     """Process a single batch: call VLM, parse response, save XMLs.
 
     Prints per-page progress lines so that calling agents can see the
     script is making forward progress (prevents premature timeout kills).
+
+    per_page_references: optional dict mapping page number to formatted
+    poppler reference text. Passed through to build_messages().
 
     Returns the number of pages successfully saved.
     """
     batch_t0 = time.time()
     print(f"[VLM] Batch {batch_index}/{total_batches}: sending pages {start}-{end}...")
 
-    messages = build_messages(workspace, image_info, start, end)
+    messages = build_messages(
+        workspace, image_info, start, end,
+        per_page_references=per_page_references,
+    )
 
     try:
         response = call_vlm(messages)
@@ -685,6 +789,9 @@ def main():
                         help="Pages per batch (default: profile-dependent)")
     parser.add_argument("--model-profile", choices=["strong", "weak"], default=None,
                         help="Model profile (default: from VLM_MODEL_PROFILE env or 'strong')")
+    parser.add_argument("--pdf-structure", type=str, default=None,
+                        help="Path to JSON output of parse_pdf_structure.py (digital PDF). "
+                             "When provided, injects exact text into VLM prompts.")
     args = parser.parse_args()
 
     # Apply model profile from CLI flag (takes precedence over env var)
@@ -703,6 +810,12 @@ def main():
 
     image_info = load_image_info(workspace)
     batches = compute_batches(total_pages, batch_size)
+
+    # Load poppler reference text when --pdf-structure is provided (digital PDFs)
+    per_page_references = None
+    if args.pdf_structure:
+        per_page_references = load_poppler_references(args.pdf_structure)
+        print(f"Loaded poppler reference text for {len(per_page_references)} pages")
 
     # Count pages already generated (from a previous or interrupted run)
     pre_existing = sum(1 for n in range(1, total_pages + 1)
@@ -726,7 +839,8 @@ def main():
             continue
 
         process_batch(workspace, image_info, start, end,
-                      batch_idx, len(batches), total_pages)
+                      batch_idx, len(batches), total_pages,
+                      per_page_references=per_page_references)
 
     # Recount from disk — avoids double-counting when a batch regenerates
     # pages that pre_existing already counted (strong profile, partial batch)
