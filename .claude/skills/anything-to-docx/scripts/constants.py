@@ -12,12 +12,12 @@ Source scripts import only what they need — no behavioral changes.
 MERGE_SHORT_TEXT_WORD_THRESHOLD = 5
 
 # Similarity weighting for short text (< MERGE_SHORT_TEXT_WORD_THRESHOLD words)
-MERGE_SHORT_TEXT_WORD_WEIGHT = 0.4    # word-Jaccard weight for short text
-MERGE_SHORT_TEXT_CHAR_WEIGHT = 0.6    # char-overlap weight for short text
+MERGE_SHORT_TEXT_WORD_WEIGHT = 0.4  # word-Jaccard weight for short text
+MERGE_SHORT_TEXT_CHAR_WEIGHT = 0.6  # char-overlap weight for short text
 
 # Similarity weighting for long text (>= MERGE_SHORT_TEXT_WORD_THRESHOLD words)
-MERGE_LONG_TEXT_WORD_WEIGHT = 0.7     # word-Jaccard weight for long text
-MERGE_LONG_TEXT_CHAR_WEIGHT = 0.3     # char-overlap weight for long text
+MERGE_LONG_TEXT_WORD_WEIGHT = 0.7  # word-Jaccard weight for long text
+MERGE_LONG_TEXT_CHAR_WEIGHT = 0.3  # char-overlap weight for long text
 
 # Minimum base similarity before any bonuses are applied
 MERGE_BASE_SIM_THRESHOLD = 0.2
@@ -169,8 +169,8 @@ VLM_DEFAULT_ENDPOINT = "http://localhost:1234/v1/chat/completions"
 # Default API key (LMStudio ignores this but OpenAI-compat requires the header)
 VLM_DEFAULT_API_KEY = "lm-studio"
 
-# Request timeout in seconds (20 min — 122B model needs ~2-4 min/page on consumer GPU)
-VLM_DEFAULT_TIMEOUT = 1200
+# Request timeout in seconds (2 hours — large/local VLM jobs can run very slowly)
+VLM_DEFAULT_TIMEOUT = 7200
 
 # Maximum output tokens (Qwen3.5 supports up to 128K)
 VLM_DEFAULT_MAX_TOKENS = 131072

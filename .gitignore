@@ -176,3 +176,7 @@ data/
 /apps/frontend/dist/
 *.pid
 .DS_Store
+
+# Opencode config files (may contain API keys)
+opencode.json
+opencode.backup.json

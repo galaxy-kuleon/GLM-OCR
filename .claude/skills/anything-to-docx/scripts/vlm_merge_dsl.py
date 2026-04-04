@@ -27,13 +27,17 @@ import requests
 from lxml import etree
 from PIL import Image
 
+from constants import VLM_DEFAULT_TIMEOUT
+
 
 # ---------------------------------------------------------------------------
 # VLM Configuration — override any value via environment variable
 # ---------------------------------------------------------------------------
 
 # LMStudio local endpoint; override with VLM_ENDPOINT env var for remote/cloud VLM
-VLM_ENDPOINT = os.environ.get("VLM_ENDPOINT", "http://localhost:1234/v1/chat/completions")
+VLM_ENDPOINT = os.environ.get(
+    "VLM_ENDPOINT", "http://localhost:1234/v1/chat/completions"
+)
 
 # Default to qwen3.5-122b-a10b (local); override with VLM_MODEL env var
 VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.5-122b-a10b")
@@ -41,8 +45,8 @@ VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.5-122b-a10b")
 # LMStudio ignores API keys, but OpenAI-compatible API requires the header
 VLM_API_KEY = os.environ.get("VLM_API_KEY", "lm-studio")
 
-# 10 min — an 8-page merge batch with images + OCR data takes ~3-5 min on consumer GPUs
-API_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", "600"))
+# Reuse the skill-wide default so generate/merge steps stay aligned.
+API_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", str(VLM_DEFAULT_TIMEOUT)))
 
 # Qwen3.5 supports up to 128K output tokens; merged XML for 8 pages ≈ 20-40K tokens
 API_MAX_TOKENS = int(os.environ.get("VLM_MAX_TOKENS", "131072"))
@@ -95,7 +99,9 @@ def clean_ocr_content(text):
         return text
     cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*```", "", text)
     cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*\n?\s*```", "", cleaned)
-    cleaned = re.sub(r"^```(?:markdown|xml|json|html)?$", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(
+        r"^```(?:markdown|xml|json|html)?$", "", cleaned, flags=re.MULTILINE
+    )
     cleaned = cleaned.strip()
     # Remove stray leading "/" from figure captions
     if cleaned.startswith("/ ") or cleaned.startswith("／ "):
@@ -134,7 +140,9 @@ def load_ocr_data(workspace):
     return data
 
 
-def load_ocr_markdown(workspace, max_chars=2000):  # First 2000 chars of OCR markdown — provides translation context without exceeding token budget
+def load_ocr_markdown(
+    workspace, max_chars=2000
+):  # First 2000 chars of OCR markdown — provides translation context without exceeding token budget
     """Load glm-ocr markdown content (truncated for context)."""
     md_path = Path(workspace) / "ocr-output" / "input" / "input.md"
     if not md_path.exists():
@@ -236,7 +244,9 @@ def build_user_prompt(vlm_texts, ocr_pages, ocr_markdown, start_page, end_page):
     ocr_parts = []
     for pn in range(start_page, end_page + 1):
         page_data = ocr_pages.get(pn, [])
-        ocr_parts.append(f"--- Page {pn} (0-indexed: {pn - 1}) ---\n{json.dumps(page_data, ensure_ascii=False)}")
+        ocr_parts.append(
+            f"--- Page {pn} (0-indexed: {pn - 1}) ---\n{json.dumps(page_data, ensure_ascii=False)}"
+        )
     ocr_section = "\n\n".join(ocr_parts)
 
     return f"""\
@@ -269,10 +279,12 @@ def build_messages(user_prompt, image_b64s):
     # Images first (for pages that have them)
     for img_b64 in image_b64s:
         if img_b64 is not None:
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{img_b64}"},
-            })
+            content_parts.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                }
+            )
 
     # Text prompt last
     content_parts.append({"type": "text", "text": user_prompt})
@@ -302,19 +314,30 @@ def call_vlm_merge(messages):
     }
 
     try:
-        resp = requests.post(VLM_ENDPOINT, json=payload, headers=headers, timeout=API_TIMEOUT)
+        resp = requests.post(
+            VLM_ENDPOINT, json=payload, headers=headers, timeout=API_TIMEOUT
+        )
         resp.raise_for_status()
     except requests.exceptions.ConnectionError:
         print(f"  ERROR: Cannot connect to VLM at {VLM_ENDPOINT}", file=sys.stderr)
-        print(f"  FIX: Check LMStudio is running and model {VLM_MODEL} is loaded.", file=sys.stderr)
+        print(
+            f"  FIX: Check LMStudio is running and model {VLM_MODEL} is loaded.",
+            file=sys.stderr,
+        )
         raise
     except requests.exceptions.Timeout:
         print(f"  ERROR: VLM request timed out after {API_TIMEOUT}s", file=sys.stderr)
-        print(f"  FIX: Increase VLM_TIMEOUT (current: {API_TIMEOUT}s) or reduce batch size.", file=sys.stderr)
+        print(
+            f"  FIX: Increase VLM_TIMEOUT (current: {API_TIMEOUT}s) or reduce batch size.",
+            file=sys.stderr,
+        )
         raise
     except requests.exceptions.HTTPError as e:
         print(f"  ERROR: VLM returned HTTP error: {e}", file=sys.stderr)
-        print(f"  FIX: Check VLM server logs. Model may be out of memory.", file=sys.stderr)
+        print(
+            f"  FIX: Check VLM server logs. Model may be out of memory.",
+            file=sys.stderr,
+        )
         raise
 
     data = resp.json()
@@ -324,7 +347,10 @@ def call_vlm_merge(messages):
     if not content.strip():
         reasoning = msg.get("reasoning_content", "") or ""
         if reasoning.strip():
-            print("  Warning: 'content' was empty, using 'reasoning_content' as fallback", file=sys.stderr)
+            print(
+                "  Warning: 'content' was empty, using 'reasoning_content' as fallback",
+                file=sys.stderr,
+            )
             content = reasoning
 
     # Strip markdown code fences if present
@@ -340,7 +366,10 @@ def call_vlm_merge_with_retry(messages):
     try:
         return call_vlm_merge(messages)
     except Exception as e:
-        print(f"  VLM call failed: {e}. Retrying in {API_RETRY_DELAY}s...", file=sys.stderr)
+        print(
+            f"  VLM call failed: {e}. Retrying in {API_RETRY_DELAY}s...",
+            file=sys.stderr,
+        )
         time.sleep(API_RETRY_DELAY)
         return call_vlm_merge(messages)  # Let this one propagate if it fails
 
@@ -460,7 +489,9 @@ def fallback_copy_vlm(workspace, page_num):
 # ---------------------------------------------------------------------------
 
 
-def process_batch(workspace, start_page, end_page, ocr_data, ocr_markdown, batch_idx, total_batches):
+def process_batch(
+    workspace, start_page, end_page, ocr_data, ocr_markdown, batch_idx, total_batches
+):
     """Process a single batch of pages.
 
     Args:
@@ -494,7 +525,9 @@ def process_batch(workspace, start_page, end_page, ocr_data, ocr_markdown, batch
             ocr_pages[pn] = []
 
     # Check if any page is missing both sources
-    pages_missing_ocr = [pn for pn in range(start_page, end_page + 1) if not ocr_pages.get(pn)]
+    pages_missing_ocr = [
+        pn for pn in range(start_page, end_page + 1) if not ocr_pages.get(pn)
+    ]
     if pages_missing_ocr:
         print(f"  Note: OCR data missing for pages: {pages_missing_ocr}")
 
@@ -504,7 +537,9 @@ def process_batch(workspace, start_page, end_page, ocr_data, ocr_markdown, batch
         image_b64s.append(load_page_image_b64(workspace, pn))
 
     # Build prompt and messages
-    user_prompt = build_user_prompt(vlm_texts, ocr_pages, ocr_markdown, start_page, end_page)
+    user_prompt = build_user_prompt(
+        vlm_texts, ocr_pages, ocr_markdown, start_page, end_page
+    )
     messages = build_messages(user_prompt, image_b64s)
 
     # Call VLM
@@ -518,7 +553,10 @@ def process_batch(workspace, start_page, end_page, ocr_data, ocr_markdown, batch
     merged_pages = extract_pages_from_response(response_text, start_page, end_page)
 
     if not merged_pages:
-        print(f"  Warning: No pages extracted from VLM response for batch {batch_idx}", file=sys.stderr)
+        print(
+            f"  Warning: No pages extracted from VLM response for batch {batch_idx}",
+            file=sys.stderr,
+        )
 
     return merged_pages
 
@@ -529,7 +567,9 @@ def main():
     )
     parser.add_argument("--workspace", required=True, help="Workspace directory path")
     parser.add_argument("--pages", required=True, type=int, help="Total page count")
-    parser.add_argument("--batch-size", type=int, default=8, help="Pages per VLM batch (default: 8)")
+    parser.add_argument(
+        "--batch-size", type=int, default=8, help="Pages per VLM batch (default: 8)"
+    )
     args = parser.parse_args()
 
     workspace = args.workspace
@@ -548,14 +588,20 @@ def main():
     # Build batches
     batches = make_page_batches(total_pages, batch_size)
     total_batches = len(batches)
-    print(f"Processing {total_pages} pages in {total_batches} batch(es) (batch size: {batch_size})")
+    print(
+        f"Processing {total_pages} pages in {total_batches} batch(es) (batch size: {batch_size})"
+    )
 
     # Process each batch
     for batch_idx, (start_page, end_page) in enumerate(batches, start=1):
         merged = process_batch(
-            workspace, start_page, end_page,
-            ocr_data, ocr_markdown,
-            batch_idx, total_batches,
+            workspace,
+            start_page,
+            end_page,
+            ocr_data,
+            ocr_markdown,
+            batch_idx,
+            total_batches,
         )
 
         # Save results (or fallback)

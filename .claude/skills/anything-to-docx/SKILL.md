@@ -468,7 +468,7 @@ uv run .claude/skills/shared/verify_step.py --step B2 --workspace "$WORKSPACE"
 
 **ALWAYS run VLM for all inputs — digital or scanned. Do NOT skip this step.**
 
-**IMPORTANT: This command is SLOW** (1-5 minutes depending on page count). **Set your bash timeout to at least 600 seconds** — for example: `timeout 600 uv run ...`, or configure your agent's bash timeout setting. Do NOT interrupt or retry early. The script prints `[VLM] Page N/M complete` progress lines as proof of forward progress — as long as these appear, the process is working.
+**IMPORTANT: This command is SLOW** (and can be much slower on large files or local VLMs). **Set your bash timeout to at least 7200 seconds** — for example: `timeout 7200 uv run ...`, or configure your agent's bash timeout setting. Do NOT interrupt or retry early. The script prints `[VLM] Page N/M complete` progress lines as proof of forward progress — as long as these appear, the process is working.
 
 This script saves each page incrementally. If interrupted, re-run the same command and it will skip pages that already have valid XML in `dsl-vlm/`, regenerating only the missing ones.
 
