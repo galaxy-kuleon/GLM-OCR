@@ -1,0 +1,56 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "lmstudio/qwen3.5-27b",
+  "small_model": "lmstudio/qwen3.5-9b",
+  "provider": {
+    "lmstudio": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LM Studio (local)",
+      "options": {
+        "baseURL": "http://localhost:1234/v1",
+        "apiKey": "lm-studio"
+      },
+      "models": {
+        "qwen3.5-122b-a10b": {
+          "name": "qwen3.5-122b-a10b",
+          "temperature": true,
+          "options": {
+            "top_k": 20,
+            "min_p": 0.0,
+            "presence_penalty": 0.0,
+            "repetition_penalty": 1.0
+          }
+        }
+      }
+    }
+  },
+  "agent": {
+    "build": {
+      "model": "lmstudio/qwen3.5-122b-a10b",
+      "temperature": 0.6,
+      "top_p": 0.95
+    },
+    "general": {
+      "model": "lmstudio/qwen3.5-122b-a10b",
+      "temperature": 0.6,
+      "top_p": 0.95
+    },
+    "plan": {
+      "model": "lmstudio/qwen3.5-122b-a10b",
+      "temperature": 0.6,
+      "top_p": 0.95
+    },
+    "explore": {
+      "model": "lmstudio/qwen3.5-122b-a10b",
+      "temperature": 0.6,
+      "top_p": 0.95
+    },
+    "title": {
+      "model": "lmstudio/qwen3.5-122b-a10b"
+    },
+    "summary": {
+      "model": "lmstudio/qwen3.5-122b-a10b"
+    }
+  },
+  "permission": "allow"
+}

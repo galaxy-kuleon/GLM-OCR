@@ -11,7 +11,13 @@ Usage:
         .claude/skills/another-pure-pure-docx-translate-to-docx/scripts/apply_docx_translations.py \
         --input INPUT.docx \
         --translations workspace/translations.json \
+        --texts workspace/texts.json \
         --output workspace/translated-output.docx
+
+If translations.json segments are missing the 'part' field (which XML part
+inside the DOCX they belong to), the script will look up the mapping from
+texts.json via --texts.  If --texts is not provided, defaults to
+'word/document.xml' (the standard DOCX body).
 """
 
 from __future__ import annotations
@@ -270,13 +276,28 @@ def _apply_chart_translation(
     return False
 
 
+def _resolve_part(segment: dict, id_to_part: dict[str, str]) -> str:
+    """Resolve the XML part name for a translation segment.
+
+    Lookup order:
+    1. segment["part"] if present
+    2. id_to_part mapping (from texts.json) keyed by segment["id"]
+    3. Default: "word/document.xml" (standard DOCX body location)
+    """
+    part = segment.get("part")
+    if part:
+        return part
+    return id_to_part.get(segment["id"], "word/document.xml")
+
+
 def _apply_single_translation(
     trees: dict[str, etree._Element],
     segment: dict,
+    id_to_part: dict[str, str] | None = None,
 ) -> bool:
     """Apply a single translation segment."""
     seg_id = segment["id"]
-    part = segment["part"]
+    part = _resolve_part(segment, id_to_part or {})
     translated = segment["translated_text"]
     seg_type = segment.get("type", "")
 
@@ -310,11 +331,32 @@ def _apply_single_translation(
 # ── ZIP round-trip ───────────────────────────────────────────────────────────
 
 
+def _build_id_to_part(texts_path: str | None) -> dict[str, str]:
+    """Build a mapping from segment id to XML part name from texts.json.
+
+    Returns an empty dict if texts_path is None or the file cannot be read.
+    """
+    if not texts_path:
+        return {}
+    try:
+        with open(texts_path, "r", encoding="utf-8") as f:
+            texts_data = json.load(f)
+        segments = texts_data.get("segments", [])
+        return {seg["id"]: seg["part"] for seg in segments if "id" in seg and "part" in seg}
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        print(f"WARNING: Could not read texts file '{texts_path}': {e}", file=sys.stderr)
+        return {}
+
+
 def apply_translations(
     input_path: str,
     translations_path: str,
     output_path: str,
+    texts_path: str | None = None,
 ) -> None:
+    # Build id→part mapping from texts.json (if provided)
+    id_to_part = _build_id_to_part(texts_path)
+
     with open(translations_path, "r", encoding="utf-8") as f:
         translations_data = json.load(f)
 
@@ -334,7 +376,7 @@ def apply_translations(
     # Collect all parts that need modification
     parts_needed: set[str] = set()
     for seg in translation_segments:
-        parts_needed.add(seg["part"])
+        parts_needed.add(_resolve_part(seg, id_to_part))
 
     # Read and parse needed XML parts from the DOCX
     trees: dict[str, etree._Element] = {}
@@ -352,11 +394,13 @@ def apply_translations(
         translated_text = seg.get("translated_text", "")
         if not translated_text and not seg.get("full_text", ""):
             continue
-        if _apply_single_translation(trees, seg):
-            modified_parts.add(seg["part"])
+        if _apply_single_translation(trees, seg, id_to_part):
+            part = _resolve_part(seg, id_to_part)
+            modified_parts.add(part)
             applied += 1
         else:
-            print(f"  WARNING: Could not apply translation for {seg['id']} in {seg['part']}", file=sys.stderr)
+            part = _resolve_part(seg, id_to_part)
+            print(f"  WARNING: Could not apply translation for {seg['id']} in {part}", file=sys.stderr)
             failed += 1
 
     # Rebuild the DOCX: copy all files, replacing modified XML parts
@@ -388,9 +432,14 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="Path to original DOCX file")
     parser.add_argument("--translations", required=True, help="Path to translations JSON file")
     parser.add_argument("--output", required=True, help="Path to output translated DOCX file")
+    parser.add_argument(
+        "--texts",
+        default=None,
+        help="Path to texts.json (id->part mapping for translations missing 'part')",
+    )
     args = parser.parse_args()
 
-    apply_translations(args.input, args.translations, args.output)
+    apply_translations(args.input, args.translations, args.output, texts_path=args.texts)
 
 
 if __name__ == "__main__":

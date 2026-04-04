@@ -255,6 +255,7 @@ source .atd-env.sh
 uv run --with lxml \
   .claude/skills/another-pure-pure-docx-translate-to-docx/scripts/apply_docx_translations.py \
   --input "$DOCX_PATH" --translations "$WORKSPACE/translations.json" \
+  --texts "$WORKSPACE/texts.json" \
   --output "$WORKSPACE/translated-output.docx"
 ```
 
