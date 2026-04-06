@@ -394,19 +394,31 @@ def add_paragraph_borders(paragraph, color_hex="000000", size=4):
 
 
 def _sanitize_text(text):
-    """Last-line-of-defense cleanup for OCR artifacts in rendered text.
+    """Last-line-of-defense cleanup for OCR/translation artifacts in rendered text.
 
-    Removes markdown code fences, stray leading slashes, and markdown
-    heading markers that may have survived earlier pipeline stages.
+    Removes markdown code fences, stray leading slashes, XML/HTML tags,
+    markdown bold/italic/heading markers, and table separator lines that may
+    have survived earlier pipeline stages (including weak LLM translations).
     """
     if not text:
         return text
+    # Code fences
     cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*```", "", text)
     cleaned = re.sub(r"```(?:markdown|xml|json|html)?", "", cleaned)
     cleaned = cleaned.strip()
     # Strip stray leading "/" or "／" from figure captions (OCR artifact)
     cleaned = re.sub(r"^[/\uff0f]\s+", "", cleaned)
-    return cleaned
+    # Defense-in-depth: XML/HTML tags (keep inner text), including ns:tag
+    cleaned = re.sub(r"</?[a-zA-Z][a-zA-Z0-9:]*(?:\s[^>]*)?\s*/?>", "", cleaned)
+    # Defense-in-depth: markdown table separator lines
+    cleaned = re.sub(r"^\s*\|[\s:|-]+\|\s*$", "", cleaned, flags=re.MULTILINE)
+    # Defense-in-depth: markdown bold **text** -> text
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned)
+    # Defense-in-depth: markdown italic *text* -> text (not math like 2*3)
+    cleaned = re.sub(r"(?<!\w)\*([^\s*][^*]*?)\*(?!\w)", r"\1", cleaned)
+    # Defense-in-depth: markdown heading markers
+    cleaned = re.sub(r"^#+\s+", "", cleaned, flags=re.MULTILINE)
+    return cleaned.strip()
 
 
 def process_runs(para, elem, page_font_latin, page_font_cjk):
@@ -612,8 +624,14 @@ def _col_widths_are_uniform(ratios):
 
 
 def process_table(doc, elem, page_font_latin, page_font_cjk, workspace):
-    num_rows = int(elem.get("rows", "0"))
-    num_cols = int(elem.get("cols", "0"))
+    # Count actual rows/cols from content, not VLM-declared attributes (which are often wrong)
+    actual_row_elems = elem.findall("row")
+    num_rows = len(actual_row_elems) if actual_row_elems else int(elem.get("rows", "0"))
+    max_col = 0
+    for cell in elem.iter("cell"):
+        col_idx = int(cell.get("col", "0"))
+        max_col = max(max_col, col_idx)
+    num_cols = max_col + 1 if max_col > 0 or elem.find(".//cell") is not None else int(elem.get("cols", "0"))
     border_style = elem.get("border-style", "full")
 
     if num_rows == 0 or num_cols == 0:

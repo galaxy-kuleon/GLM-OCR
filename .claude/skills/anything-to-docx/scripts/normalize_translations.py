@@ -35,6 +35,50 @@ from pathlib import Path
 BATCH_FILE_PATTERN = re.compile(r"^batch-(\d+)\.json$")
 
 
+def sanitize_translated_text(text: str) -> str:
+    """Strip markup artifacts that weak LLMs inject into translated text.
+
+    Removes:
+    - XML/HTML tags (preserving inner text)
+    - Markdown table separator lines (e.g., | --- | --- |)
+    - Markdown bold/italic wrappers (**text** -> text, *text* -> text)
+      but NOT standalone * in math contexts (e.g., 2*3)
+    - Markdown heading markers (## Heading -> Heading)
+    - Code fences (defense-in-depth, also handled by extract_dsl_texts.py)
+
+    Pure function: (str) -> str, no side effects.
+    """
+    if not text:
+        return text
+
+    # 1. Remove code fences (defense-in-depth)
+    cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*```", "", text)
+    cleaned = re.sub(r"```(?:markdown|xml|json|html)?\s*\n?\s*```", "", cleaned)
+    cleaned = re.sub(r"^```(?:markdown|xml|json|html)?$", "", cleaned, flags=re.MULTILINE)
+
+    # 2. Remove XML/HTML tags, keep inner text
+    # Matches <tag>, <tag attr="val">, </tag>, <tag/>, <ns:tag>
+    cleaned = re.sub(r"</?[a-zA-Z][a-zA-Z0-9:]*(?:\s[^>]*)?\s*/?>", "", cleaned)
+
+    # 3. Remove markdown table separator lines: | --- | --- | or |:---:|
+    cleaned = re.sub(r"^\s*\|[\s:|-]+\|\s*$", "", cleaned, flags=re.MULTILINE)
+
+    # 4. Remove markdown bold wrappers: **text** -> text
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned)
+
+    # 5. Remove markdown italic wrappers: *text* -> text
+    # But NOT standalone * in math (e.g., 2*3) — require space or start/end boundary
+    cleaned = re.sub(r"(?<!\w)\*([^\s*][^*]*?)\*(?!\w)", r"\1", cleaned)
+
+    # 6. Remove markdown heading markers at start of text
+    cleaned = re.sub(r"^#+\s+", "", cleaned, flags=re.MULTILINE)
+
+    # 7. Collapse multiple blank lines left by removals
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+    return cleaned.strip()
+
+
 def find_batch_files(workspace: Path) -> list[tuple[int, Path]]:
     """Find and sort batch-N.json files, excluding batch-input-* and batch-recovery-*.
 
@@ -88,6 +132,9 @@ def normalize_entry(entry, source_file: str = "<unknown>") -> dict:
     # Coerce None (JSON null) to empty string
     if translated is None:
         translated = ""
+
+    # Sanitize: strip XML tags, markdown artifacts from weak LLM output
+    translated = sanitize_translated_text(translated)
 
     return {"id": seg_id, "translated_text": translated}
 

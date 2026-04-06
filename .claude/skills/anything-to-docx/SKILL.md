@@ -275,6 +275,11 @@ else
   cp "$DOCX_PATH" "$WORKSPACE/final-output.docx"
 fi
 ls -lh "$WORKSPACE/final-output.docx"
+
+# Declare deliverable — deterministic manifest for open-webui output collection (Tier 1)
+RELPATH="${WORKSPACE#$OUTPUT_DIR/}/final-output.docx"
+echo "$RELPATH" > "$OUTPUT_DIR/.deliverables"
+echo "Wrote .deliverables: $RELPATH"
 ```
 
 Report: `$WORKSPACE/final-output.docx`. **Route A done. STOP here.**
@@ -638,6 +643,11 @@ else
   cp "$WORKSPACE/output.docx" "$WORKSPACE/final-output.docx"
 fi
 ls -lh "$WORKSPACE/final-output.docx"
+
+# Declare deliverable — deterministic manifest for open-webui output collection (Tier 1)
+RELPATH="${WORKSPACE#$OUTPUT_DIR/}/final-output.docx"
+echo "$RELPATH" > "$OUTPUT_DIR/.deliverables"
+echo "Wrote .deliverables: $RELPATH"
 ```
 
 Report: output path, page count, translation status. **Route B done. STOP here.**

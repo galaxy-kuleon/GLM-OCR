@@ -109,13 +109,46 @@ def navigate_to_element(root, path_steps):
     return current
 
 
-def apply_translation_to_element(elem, translated_text):
+def apply_translation_to_element(elem, translated_text, segment_id="<unknown>"):
     """Apply translated text to an element.
 
-    For <run> elements: sets .text
-    For <cell> elements (no run children): sets .text
+    For <run> elements or leaf elements: sets .text directly.
+    For elements with <run> children (e.g., <cell>): sets text on the first
+    <run> child and removes the rest, preserving the first run's formatting
+    attributes (bold, font-size, etc.) for correct dsl_to_docx rendering.
+
+    This fixes the latent bug where setting .text on a parent element with
+    <run> children would be silently ignored by dsl_to_docx.py, which reads
+    text from run children rather than parent .text.
     """
-    elem.text = translated_text
+    run_children = [child for child in elem if child.tag == "run"]
+
+    if run_children:
+        # Element has <run> children: set text on first run, remove the rest.
+        # This preserves the first run's formatting attributes (font-size,
+        # bold, etc.) while ensuring dsl_to_docx sees the translated text.
+        print(
+            f"INFO: element '{elem.tag}' has {len(run_children)} <run> "
+            f"child(ren) — setting text on first run and removing extras "
+            f"(segment_id={segment_id})",
+            file=sys.stderr,
+        )
+        run_children[0].text = translated_text
+        for extra_run in run_children[1:]:
+            elem.remove(extra_run)
+    elif len(elem) > 0:
+        # Has non-run children: warn and set .text (best effort)
+        child_tags = [child.tag for child in elem]
+        print(
+            f"WARNING: setting .text on '{elem.tag}' element that has "
+            f"{len(elem)} non-run child(ren) {child_tags} — child text may "
+            f"be shadowed (segment_id={segment_id})",
+            file=sys.stderr,
+        )
+        elem.text = translated_text
+    else:
+        # Leaf element (no children): set .text directly
+        elem.text = translated_text
 
 
 # ---------------------------------------------------------------------------
@@ -183,7 +216,7 @@ def apply_translations_to_page(xml_path, page_num, translation_map):
             skipped += 1
             continue
 
-        apply_translation_to_element(target, translated_text)
+        apply_translation_to_element(target, translated_text, segment_id=seg_id)
         applied += 1
 
     return root, applied, skipped

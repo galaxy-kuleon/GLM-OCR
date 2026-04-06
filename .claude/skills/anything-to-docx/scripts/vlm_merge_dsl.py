@@ -34,16 +34,16 @@ from constants import VLM_DEFAULT_TIMEOUT
 # VLM Configuration — override any value via environment variable
 # ---------------------------------------------------------------------------
 
-# LMStudio local endpoint; override with VLM_ENDPOINT env var for remote/cloud VLM
+# OpenRouter endpoint; override with VLM_ENDPOINT env var
 VLM_ENDPOINT = os.environ.get(
-    "VLM_ENDPOINT", "http://localhost:1234/v1/chat/completions"
+    "VLM_ENDPOINT", "https://openrouter.ai/api/v1/chat/completions"
 )
 
-# Default to qwen3.5-122b-a10b (local); override with VLM_MODEL env var
-VLM_MODEL = os.environ.get("VLM_MODEL", "qwen3.5-122b-a10b")
+# Default to mistral-small-2603 on OpenRouter; override with VLM_MODEL env var
+VLM_MODEL = os.environ.get("VLM_MODEL", "mistralai/mistral-small-2603")
 
-# LMStudio ignores API keys, but OpenAI-compatible API requires the header
-VLM_API_KEY = os.environ.get("VLM_API_KEY", "lm-studio")
+# OpenRouter API key — check VLM_API_KEY first, then OPENROUTER_API_KEY
+VLM_API_KEY = os.environ.get("VLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY", "")
 
 # Reuse the skill-wide default so generate/merge steps stay aligned.
 API_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", str(VLM_DEFAULT_TIMEOUT)))

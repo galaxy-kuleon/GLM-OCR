@@ -1562,6 +1562,561 @@ def _dedup_consecutive_elements(page_el):
 
 
 # ---------------------------------------------------------------------------
+# Post-processing rules (applied after merge, before DOCX generation)
+# ---------------------------------------------------------------------------
+
+# Footer detection patterns (language-agnostic)
+_FOOTER_PATTERNS = [
+    re.compile(r"第\s*\d*\s*頁"),                 # Chinese page number
+    re.compile(r"Page\s*\d+", re.IGNORECASE),     # English page number
+    re.compile(r"confidential|機密", re.IGNORECASE),
+    re.compile(r"^[A-Z].*(?:Corp\.|Ltd\.|Inc\.)"),  # Company name footers
+]
+
+# List item detection patterns
+_LIST_NUMBER_PATTERN = re.compile(r"^(\d+)[.、．)\s]")
+_LIST_CJK_NUMBER_PATTERN = re.compile(r"^[一二三四五六七八九十]+[、.．)\s]")
+_LIST_BULLET_PATTERN = re.compile(r"^[•◦▪▸►‣⁃·‧※]\s")
+
+
+def _is_footer_element(elem):
+    """Check if an element looks like a footer (small font + footer pattern)."""
+    if elem.tag == "page-footer":
+        return True
+    if elem.tag not in ("paragraph", "heading"):
+        return False
+    # Check font size — footers typically <= 9pt
+    run = elem.find("run")
+    if run is not None:
+        try:
+            size = float(run.get("font-size-pt", "11"))
+            if size > 10:
+                return False
+        except (ValueError, TypeError):
+            return False
+    text = _get_element_text(elem)
+    if not text or len(text) < 3:
+        return False
+    return any(p.search(text) for p in _FOOTER_PATTERNS)
+
+
+def _postprocess_footer_reorder(page_el):
+    """Rule 1: Move body content that appears after footer to before it.
+
+    VLM sometimes emits footer elements mid-page, then continues with body
+    text after the footer. This reorders them so footer is always last.
+    """
+    children = list(page_el)
+    first_footer_idx = None
+    displaced = []
+
+    # Find first footer element
+    for i, child in enumerate(children):
+        if _is_footer_element(child):
+            first_footer_idx = i
+            break
+
+    if first_footer_idx is None:
+        return 0
+
+    # Collect body elements after the first footer
+    moved = 0
+    for child in children[first_footer_idx + 1:]:
+        if child.tag in ("heading", "paragraph") and not _is_footer_element(child):
+            displaced.append(child)
+
+    if not displaced:
+        return 0
+
+    # Move displaced elements to just before the first footer
+    footer_elem = children[first_footer_idx]
+    for elem in displaced:
+        page_el.remove(elem)
+        page_el.insert(list(page_el).index(footer_elem), elem)
+        moved += 1
+
+    return moved
+
+
+def _postprocess_page_wide_dedup(page_el):
+    """Rule 2: Remove fragment duplicates across the entire page.
+
+    If element A's text is a substring (>80% of A contained in B) of a
+    longer element B on the same page, remove A.
+    Also: if heading and paragraph have near-identical text, keep heading.
+    """
+    removed = 0
+    text_elements = []
+    for child in list(page_el):
+        if child.tag in ("heading", "paragraph"):
+            text = _get_element_text(child)
+            if text and len(text.strip()) > 5:
+                text_elements.append((child, text.strip()))
+
+    to_remove = set()
+    for i, (elem_a, text_a) in enumerate(text_elements):
+        if id(elem_a) in to_remove:
+            continue
+        for j, (elem_b, text_b) in enumerate(text_elements):
+            if i == j or id(elem_b) in to_remove:
+                continue
+            # Skip if both are short — avoid removing genuine short content
+            if len(text_a) < 15 and len(text_b) < 15:
+                continue
+            # A is substring of B (A is shorter fragment)
+            if len(text_a) < len(text_b):
+                # Check if A's text appears within B
+                if text_a in text_b or combined_similarity(text_a, text_b) > 0.85:
+                    to_remove.add(id(elem_a))
+                    break
+            # Same length, cross-tag dedup (heading wins over paragraph)
+            elif abs(len(text_a) - len(text_b)) < 5:
+                sim = combined_similarity(text_a, text_b)
+                if sim > MERGE_DUPLICATE_SIMILARITY:
+                    # Keep heading over paragraph
+                    if elem_a.tag == "paragraph" and elem_b.tag == "heading":
+                        to_remove.add(id(elem_a))
+                        break
+                    elif elem_a.tag == "heading" and elem_b.tag == "paragraph":
+                        to_remove.add(id(elem_b))
+
+    for child in list(page_el):
+        if id(child) in to_remove:
+            page_el.remove(child)
+            removed += 1
+
+    return removed
+
+
+def _postprocess_fix_table_attrs(page_el):
+    """Rule 3: Auto-correct table rows/cols attributes to match actual content."""
+    fixed = 0
+    for table_el in page_el.findall(".//table"):
+        actual_rows = len(table_el.findall("row"))
+        declared_rows = int(table_el.get("rows", "0"))
+
+        # Find actual max col index
+        max_col = 0
+        for cell in table_el.iter("cell"):
+            col_idx = int(cell.get("col", "0"))
+            max_col = max(max_col, col_idx)
+        actual_cols = max_col + 1 if max_col > 0 or table_el.find(".//cell") is not None else 0
+        declared_cols = int(table_el.get("cols", "0"))
+
+        changed = False
+        if actual_rows != declared_rows and actual_rows > 0:
+            table_el.set("rows", str(actual_rows))
+            changed = True
+        if actual_cols != declared_cols and actual_cols > 0:
+            table_el.set("cols", str(actual_cols))
+            changed = True
+
+        # Fix col-widths if count doesn't match actual cols
+        cw_el = table_el.find("col-widths")
+        if cw_el is not None and cw_el.text and actual_cols > 0:
+            cw_vals = [x.strip() for x in cw_el.text.split(",") if x.strip()]
+            if len(cw_vals) != actual_cols:
+                # Regenerate equal widths
+                equal_w = f"{1.0 / actual_cols:.2f}"
+                cw_el.text = ",".join([equal_w] * actual_cols)
+                changed = True
+
+        if changed:
+            fixed += 1
+    return fixed
+
+
+def _postprocess_detect_lists(page_el):
+    """Rule 4: Detect numbered/bulleted list items and add list attributes."""
+    detected = 0
+    for child in page_el.findall("paragraph"):
+        if child.get("list-level"):
+            continue
+        text = _get_element_text(child)
+        if not text:
+            continue
+        text = text.strip()
+        if _LIST_NUMBER_PATTERN.match(text):
+            child.set("list-level", "1")
+            child.set("list-type", "number")
+            detected += 1
+        elif _LIST_CJK_NUMBER_PATTERN.match(text):
+            child.set("list-level", "1")
+            child.set("list-type", "number")
+            detected += 1
+        elif _LIST_BULLET_PATTERN.match(text):
+            child.set("list-level", "1")
+            child.set("list-type", "bullet")
+            detected += 1
+    return detected
+
+
+def _bbox_iou(bbox_a, bbox_b):
+    """Calculate IoU (Intersection over Union) of two bbox strings."""
+    try:
+        a = [float(x) for x in bbox_a.split(",")]
+        b = [float(x) for x in bbox_b.split(",")]
+        if len(a) != 4 or len(b) != 4:
+            return 0.0
+    except (ValueError, AttributeError):
+        return 0.0
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    intersection = iw * ih
+    area_a = max(0, (a[2] - a[0]) * (a[3] - a[1]))
+    area_b = max(0, (b[2] - b[0]) * (b[3] - b[1]))
+    union = area_a + area_b - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def _postprocess_dedup_images(page_el):
+    """Rule 5: Deduplicate images with overlapping bboxes (IoU > 0.7)."""
+    images = page_el.findall("image")
+    if len(images) < 2:
+        return 0
+    to_remove = set()
+    for i, img_a in enumerate(images):
+        if id(img_a) in to_remove:
+            continue
+        bbox_a = img_a.get("bbox", "")
+        src_a = img_a.get("src", "")
+        for j in range(i + 1, len(images)):
+            img_b = images[j]
+            if id(img_b) in to_remove:
+                continue
+            bbox_b = img_b.get("bbox", "")
+            if _bbox_iou(bbox_a, bbox_b) > 0.7:
+                # Keep pdf-images > self-cropped > ocr > PLACEHOLDER
+                priority = {"pdf-images": 3, "self-cropped": 2, "ocr": 1}
+                score_a = next((v for k, v in priority.items() if k in src_a), 0)
+                score_b = next((v for k, v in priority.items() if k in img_b.get("src", "")), 0)
+                if score_a >= score_b:
+                    to_remove.add(id(img_b))
+                else:
+                    to_remove.add(id(img_a))
+                    break
+    removed = 0
+    for child in list(page_el):
+        if id(child) in to_remove:
+            page_el.remove(child)
+            removed += 1
+    return removed
+
+
+def _postprocess_normalize_headings(page_el):
+    """Rule 8: Normalize heading levels by font size within a page.
+
+    Builds a font-size -> level mapping and normalizes. Also promotes
+    paragraphs that match heading patterns (Article X, 第X條, Section X).
+    """
+    _HEADING_PATTERNS = [
+        re.compile(r"^(?:Article|Section|Chapter)\s+\d+", re.IGNORECASE),
+        re.compile(r"^第[一二三四五六七八九十百千\d]+[條章節篇]"),
+        re.compile(r"^[一二三四五六七八九十]+[、.．]"),
+    ]
+
+    # Collect font sizes from existing headings
+    heading_sizes = {}
+    for h in page_el.findall("heading"):
+        run = h.find("run")
+        if run is not None:
+            try:
+                size = float(run.get("font-size-pt", "11"))
+                heading_sizes[size] = heading_sizes.get(size, 0) + 1
+            except (ValueError, TypeError):
+                pass
+
+    if not heading_sizes:
+        return 0
+
+    # Map: largest -> level 1, second -> level 2, third -> level 3
+    sorted_sizes = sorted(heading_sizes.keys(), reverse=True)
+    size_to_level = {}
+    for i, size in enumerate(sorted_sizes[:3]):
+        size_to_level[size] = i + 1
+
+    fixed = 0
+
+    # Normalize existing heading levels
+    for h in page_el.findall("heading"):
+        run = h.find("run")
+        if run is None:
+            continue
+        try:
+            size = float(run.get("font-size-pt", "11"))
+        except (ValueError, TypeError):
+            continue
+        correct_level = size_to_level.get(size)
+        if correct_level and h.get("level") != str(correct_level):
+            h.set("level", str(correct_level))
+            fixed += 1
+
+    # Promote matching paragraphs to headings
+    for para in list(page_el.findall("paragraph")):
+        text = _get_element_text(para)
+        if not text:
+            continue
+        text = text.strip()
+        run = para.find("run")
+        if run is None:
+            continue
+
+        is_bold = run.get("bold") == "true"
+        try:
+            size = float(run.get("font-size-pt", "11"))
+        except (ValueError, TypeError):
+            continue
+
+        # Only promote if bold and matches heading pattern and font is heading-sized
+        if is_bold and size >= 14 and any(p.match(text) for p in _HEADING_PATTERNS):
+            level = size_to_level.get(size, 3)
+            para.tag = "heading"
+            para.set("level", str(level))
+            fixed += 1
+
+    return fixed
+
+
+def _postprocess_footer_completion(page_el, page_num, all_page_footers):
+    """Rule 9: Complete truncated footer text using page 1 as template.
+
+    If page 1 has a complete footer, use its text as template for other
+    pages, substituting only the page number.
+    """
+    if not all_page_footers:
+        return 0
+
+    fixed = 0
+    template_footer = all_page_footers.get(1)  # page 1 footer as template
+    if not template_footer:
+        return 0
+
+    for child in page_el.findall("paragraph"):
+        text = _get_element_text(child)
+        if not text:
+            continue
+        text = text.strip()
+        # Fix "第 頁" → "第 N 頁"
+        if re.match(r"^第\s*頁$", text):
+            run = child.find("run")
+            if run is not None:
+                run.text = f"第 {page_num} 頁"
+                fixed += 1
+        # Fix truncated company footer
+        elif text.endswith("—") or text.endswith("—"):
+            if template_footer and len(template_footer) > len(text):
+                run = child.find("run")
+                if run is not None:
+                    run.text = template_footer
+                    fixed += 1
+    return fixed
+
+
+_SIGNATURE_KEYWORDS = re.compile(
+    r"(?:signature|簽名|簽署|sign|seal|印章|日期|date|party\s*[ab]|甲方|乙方)",
+    re.IGNORECASE,
+)
+
+
+def _postprocess_detect_text_frames(page_el, ocr_regions):
+    """Rule 6: Detect bordered boxes / signature areas and wrap in text-frame.
+
+    Heuristic: if consecutive images are followed by signature-related label text
+    (Signature, Date, 簽名, 日期), wrap the group in a <text-frame>.
+    """
+    if not ocr_regions:
+        return 0
+
+    children = list(page_el)
+    detected = 0
+    i = 0
+    while i < len(children):
+        child = children[i]
+        if child.tag != "image":
+            i += 1
+            continue
+
+        # Look ahead: collect consecutive images + signature-label paragraphs
+        group = [child]
+        j = i + 1
+        has_sig_label = False
+        while j < len(children):
+            nxt = children[j]
+            if nxt.tag == "image":
+                group.append(nxt)
+            elif nxt.tag in ("paragraph", "heading"):
+                text = _get_element_text(nxt)
+                if text and _SIGNATURE_KEYWORDS.search(text):
+                    group.append(nxt)
+                    has_sig_label = True
+                else:
+                    break
+            else:
+                break
+            j += 1
+
+        if has_sig_label and len(group) >= 2:
+            # Build text-frame from group
+            bbox = child.get("bbox", "")
+            pw = child.get("page-width-pts", "612")
+            tf = etree.SubElement(page_el, "text-frame")
+            tf.set("bbox", bbox)
+            tf.set("page-width-pts", pw)
+            tf.set("page-height-pts", page_el.get("height-pts", "792"))
+            tf.set("has-border", "true")
+            for elem in group:
+                page_el.remove(elem)
+                tf.append(elem)
+            detected += 1
+            # Re-fetch children since we modified the tree
+            children = list(page_el)
+            # Don't advance i — the text-frame replaced the group
+        else:
+            i += 1
+
+    return detected
+
+
+def postprocess_cross_page_entity_consistency(all_pages_xml):
+    """Rule 7: Normalize entity names across pages for scanned PDFs.
+
+    Only targets ORGANIZATION-LIKE entities (ending in 公司/創投/集團/基金).
+    Clusters by edit distance (max 2 char diff), picks most frequent as
+    canonical, replaces variants. Very conservative to avoid false positives.
+
+    Args:
+        all_pages_xml: list of (page_num, xml_string) tuples.
+
+    Returns:
+        list of (page_num, fixed_xml_string) tuples, count of replacements.
+    """
+    # Only match organization-like entities with known suffixes
+    # This prevents clustering 第一條/第二條, 統一編號/合約編號, etc.
+    _ORG_SUFFIXES = ("股份有限公司", "有限公司", "公司", "創投", "集團", "基金會", "協會")
+    org_pattern = re.compile(
+        r"[\u4e00-\u9fff]{2,8}(?:" + "|".join(re.escape(s) for s in _ORG_SUFFIXES) + ")"
+    )
+
+    entity_counts = {}
+    for _, xml_str in all_pages_xml:
+        for m in org_pattern.findall(xml_str):
+            entity_counts[m] = entity_counts.get(m, 0) + 1
+
+    if not entity_counts:
+        return all_pages_xml, 0
+
+    def _edit_distance(a, b):
+        if len(a) != len(b):
+            return max(len(a), len(b))
+        return sum(1 for x, y in zip(a, b) if x != y)
+
+    # Cluster: same length, same suffix, differ by exactly 1 char in the prefix
+    clusters = []
+    used = set()
+    sorted_entities = sorted(entity_counts.items(), key=lambda x: -x[1])
+
+    for entity, count in sorted_entities:
+        if entity in used:
+            continue
+        cluster = [(entity, count)]
+        used.add(entity)
+        # Find the suffix of this entity
+        entity_suffix = ""
+        for s in _ORG_SUFFIXES:
+            if entity.endswith(s):
+                entity_suffix = s
+                break
+        for other, other_count in sorted_entities:
+            if other in used or other == entity:
+                continue
+            # Must share the same suffix
+            if not other.endswith(entity_suffix):
+                continue
+            # Must be same length and differ by exactly 1 char
+            if len(entity) == len(other) and _edit_distance(entity, other) == 1:
+                cluster.append((other, other_count))
+                used.add(other)
+        if len(cluster) > 1:
+            clusters.append(cluster)
+
+    if not clusters:
+        return all_pages_xml, 0
+
+    total_replaced = 0
+    result = list(all_pages_xml)
+    for cluster in clusters:
+        canonical = max(cluster, key=lambda x: x[1])[0]
+        for variant, _ in cluster:
+            if variant == canonical:
+                continue
+            for idx, (page_num, xml_str) in enumerate(result):
+                if variant in xml_str:
+                    new_xml = xml_str.replace(variant, canonical)
+                    count = xml_str.count(variant)
+                    result[idx] = (page_num, new_xml)
+                    total_replaced += count
+                    if count:
+                        print(f"  Entity consistency: '{variant}' → '{canonical}' "
+                              f"({count} occurrences on page {page_num})")
+
+    return result, total_replaced
+
+
+def postprocess_page(page_el, page_num, all_page_footers=None, ocr_regions=None):
+    """Apply all post-processing rules to a merged page.
+
+    Called after merge_page() steps 1-7, before writing output.
+    Returns dict of rule -> count of changes.
+    """
+    results = {}
+
+    # P0: Fix table attributes
+    n = _postprocess_fix_table_attrs(page_el)
+    if n:
+        results["table-attrs-fixed"] = n
+
+    # P1: Footer reordering (before dedup, so displaced content is in right place)
+    n = _postprocess_footer_reorder(page_el)
+    if n:
+        results["footer-reordered"] = n
+
+    # P1: Page-wide fragment dedup (after reorder, so content is in right place)
+    n = _postprocess_page_wide_dedup(page_el)
+    if n:
+        results["fragments-deduped"] = n
+
+    # P2: List detection
+    n = _postprocess_detect_lists(page_el)
+    if n:
+        results["lists-detected"] = n
+
+    # P2: Image dedup
+    n = _postprocess_dedup_images(page_el)
+    if n:
+        results["images-deduped"] = n
+
+    # P2: Heading normalization
+    n = _postprocess_normalize_headings(page_el)
+    if n:
+        results["headings-normalized"] = n
+
+    # P3: Text-frame detection for signature boxes
+    if ocr_regions:
+        n = _postprocess_detect_text_frames(page_el, ocr_regions)
+        if n:
+            results["text-frames-detected"] = n
+
+    # P3: Footer completion
+    if all_page_footers is not None:
+        n = _postprocess_footer_completion(page_el, page_num, all_page_footers)
+        if n:
+            results["footers-completed"] = n
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Per-page merge
 # ---------------------------------------------------------------------------
 
@@ -1684,6 +2239,13 @@ def merge_page(workspace, page_num, ocr_data, pdf_images_map=None,
         if reordered:
             print(f"  Page {page_num}: reordered {reordered} elements by OCR position")
 
+    # Step 8: Post-processing rules (P0-P3)
+    pp_results = postprocess_page(page_el, page_num,
+                                  all_page_footers=getattr(
+                                      merge_page, "_footer_cache", None))
+    for rule, count in pp_results.items():
+        print(f"  Page {page_num}: post-process {rule}: {count}")
+
     return etree.tostring(page_el, encoding="unicode", pretty_print=True)
 
 
@@ -1749,6 +2311,21 @@ def main():
             print(f"Poppler data: {total_paras} paragraphs across "
                   f"{len(poppler_page_lookup)} pages (digital PDF enhancement)")
 
+    # Build footer cache from page 1 for Rule 9 (footer completion)
+    # First pass: merge page 1 to extract its footer text
+    footer_cache = {}
+    p1_el = load_vlm_xml(workspace, 1)
+    if p1_el is not None:
+        for child in p1_el:
+            if child.tag in ("paragraph",) and not _is_footer_element(child):
+                continue
+            if _is_footer_element(child):
+                text = _get_element_text(child)
+                if text and "confidential" in text.lower() or "機密" in text:
+                    footer_cache[1] = text.strip()
+                    break
+    merge_page._footer_cache = footer_cache
+
     # Process each page
     success_count = 0
     for page_num in range(1, total_pages + 1):
@@ -1763,6 +2340,20 @@ def main():
             success_count += 1
         else:
             fallback_copy_vlm(workspace, page_num)
+
+    # Post-merge cross-page pass: entity consistency (Rule 7, scanned PDFs)
+    all_pages = []
+    for page_num in range(1, total_pages + 1):
+        out_path = output_dir / f"page-{page_num}.xml"
+        if out_path.exists():
+            all_pages.append((page_num, out_path.read_text(encoding="utf-8")))
+    if all_pages:
+        fixed_pages, entity_fixes = postprocess_cross_page_entity_consistency(all_pages)
+        if entity_fixes:
+            print(f"\nCross-page entity consistency: {entity_fixes} replacements")
+            for page_num, xml_str in fixed_pages:
+                out_path = output_dir / f"page-{page_num}.xml"
+                out_path.write_text(xml_str, encoding="utf-8")
 
     print(f"\nDeterministic merge complete: {success_count}/{total_pages} pages merged")
     print(f"Output in: {output_dir}")

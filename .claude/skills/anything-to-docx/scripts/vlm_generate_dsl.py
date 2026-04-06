@@ -52,8 +52,8 @@ VLM_ENDPOINT = os.environ.get("VLM_ENDPOINT", VLM_DEFAULT_ENDPOINT)
 # Qwen3.5-122B-A10B: native multimodal VLM with 256K context, 65K output
 VLM_MODEL = os.environ.get("VLM_MODEL", VLM_DEFAULT_MODEL)
 
-# LMStudio ignores API keys, but OpenAI-compatible API requires the header
-VLM_API_KEY = os.environ.get("VLM_API_KEY", VLM_DEFAULT_API_KEY)
+# OpenRouter API key — check VLM_API_KEY first, then OPENROUTER_API_KEY, then default
+VLM_API_KEY = os.environ.get("VLM_API_KEY") or os.environ.get("OPENROUTER_API_KEY", VLM_DEFAULT_API_KEY)
 
 # 10 min — an 8-page batch generating detailed XML takes ~3-5 min on consumer GPUs
 VLM_TIMEOUT = int(os.environ.get("VLM_TIMEOUT", str(VLM_DEFAULT_TIMEOUT)))
@@ -725,7 +725,7 @@ def process_batch(workspace, image_info, start, end, batch_index, total_batches,
         response = call_vlm(messages)
     except Exception as e:
         print(f"  ERROR: VLM call failed after retry: {e}", file=sys.stderr)
-        print(f"  FIX: Check LMStudio is running at {VLM_ENDPOINT} with model {VLM_MODEL} loaded.", file=sys.stderr)
+        print(f"  FIX: Check VLM endpoint is reachable at {VLM_ENDPOINT} with model {VLM_MODEL}.", file=sys.stderr)
         print(f"  FIX: If timeout, increase VLM_TIMEOUT (current: {VLM_TIMEOUT}s).", file=sys.stderr)
         return 0
 

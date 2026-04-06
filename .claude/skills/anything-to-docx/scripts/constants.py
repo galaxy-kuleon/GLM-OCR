@@ -4,6 +4,12 @@ Every tunable parameter lives here as a named constant.
 Source scripts import only what they need — no behavioral changes.
 """
 
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from project root (glm-ocr-latest-test/.env)
+load_dotenv(Path(__file__).resolve().parents[4] / ".env")
+
 # ===========================================================================
 # MERGE: Text similarity weights and thresholds
 # ===========================================================================
@@ -160,14 +166,15 @@ IMAGE_JPEG_QUALITY = 75
 # VLM: Default model configuration (overridable via env vars)
 # ===========================================================================
 
-# Default VLM model name
-VLM_DEFAULT_MODEL = "qwen3.5-122b-a10b"
+# Default VLM model name (OpenRouter model ID)
+VLM_DEFAULT_MODEL = "qwen/qwen3.5-122b-a10b"
 
-# Default LMStudio-compatible endpoint
-VLM_DEFAULT_ENDPOINT = "http://localhost:1234/v1/chat/completions"
+# Default OpenRouter endpoint
+VLM_DEFAULT_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
-# Default API key (LMStudio ignores this but OpenAI-compat requires the header)
-VLM_DEFAULT_API_KEY = "lm-studio"
+# Default API key — reads OPENROUTER_API_KEY from environment
+import os as _os
+VLM_DEFAULT_API_KEY = _os.environ.get("OPENROUTER_API_KEY", "")
 
 # Request timeout in seconds (2 hours — large/local VLM jobs can run very slowly)
 VLM_DEFAULT_TIMEOUT = 7200
