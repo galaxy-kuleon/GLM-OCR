@@ -501,8 +501,12 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
     border_color = "000000"
     has_header = False
     
+    # Stream tables (borderless) have no visible borders by default
+    if table_content.get('type') == 'stream':
+        border_visible = False
+    
     if table_style_elem is not None:
-        border_visible = table_style_elem.get('border_visible', 'true').lower() == 'true'
+        border_visible = table_style_elem.get('border_visible', 'true' if border_visible else 'false').lower() == 'true'
         border_color_hex = table_style_elem.get('border_color', '#000000')
         border_color = border_color_hex.lstrip('#')
         has_header = table_style_elem.get('header_row', 'false').lower() == 'true'
@@ -935,8 +939,12 @@ def process_table_region(doc: Document, region_elem):
     border_color = "000000"
     has_header = False
     
+    # Stream tables (borderless) have no visible borders by default
+    if table_content.get('type') == 'stream':
+        border_visible = False
+    
     if table_style_elem is not None:
-        border_visible = table_style_elem.get('border_visible', 'true').lower() == 'true'
+        border_visible = table_style_elem.get('border_visible', 'true' if border_visible else 'false').lower() == 'true'
         border_color_hex = table_style_elem.get('border_color', '#000000')
         border_color = border_color_hex.lstrip('#')
         has_header = table_style_elem.get('header_row', 'false').lower() == 'true'
@@ -1272,7 +1280,7 @@ def generate_docx(docir_path: Path, output_path: Path, positioned: bool = False,
                 
                 if region_type == 'text':
                     current_y_pt = add_positioned_text_region(doc, region_elem, page_height_pt, current_y_pt)
-                elif region_type == 'table':
+                elif region_type == 'table' or region_type == 'stream_table':
                     current_y_pt = add_positioned_table_region(doc, region_elem, page_height_pt, current_y_pt)
                 elif region_type == 'image':
                     current_y_pt = add_positioned_image_region(doc, region_elem, page_height_pt, current_y_pt, assets_dict)
@@ -1316,7 +1324,7 @@ def generate_docx(docir_path: Path, output_path: Path, positioned: bool = False,
                 
                 if region_type == 'text':
                     process_text_region(doc, region_elem)
-                elif region_type == 'table':
+                elif region_type == 'table' or region_type == 'stream_table':
                     process_table_region(doc, region_elem)
                 elif region_type == 'image':
                     process_image_region(doc, region_elem, assets_dict)
