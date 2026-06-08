@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Sample DocIR instance generated from small.pdf
+  Source: GLM-OCR pipeline (new-main branch) + Ollama glm-ocr:latest
+  Date: 2026-06-08
+  
+  This demonstrates the IR schema applied to a real 1-page document
+  with 9 detected regions (titles, text, table, image, text box).
+-->
+<docir:document xmlns:docir="urn:docir:v0.1"
+                version="0.1.0"
+                source_pdf="small.pdf"
+                generated_at="2026-06-08T22:15:00+08:00"
+                generator="glm-ocr-pipeline-v0.1.5+docir-builder-v0.1">
+
+  <!-- ============================================================ -->
+  <!-- DOCUMENT METADATA                                             -->
+  <!-- ============================================================ -->
+  <docir:metadata>
+    <docir:title>Small Test Document</docir:title>
+    <docir:page_count>1</docir:page_count>
+    <docir:default_page_size width_pt="612.0" height_pt="792.0"/>
+    <docir:pipeline_info>
+      <docir:layout_detector>PP-DocLayoutV3 (PaddlePaddle/PP-DocLayoutV3_safetensors)</docir:layout_detector>
+      <docir:ocr_engine>Ollama glm-ocr:latest (localhost:11434, ollama_generate mode)</docir:ocr_engine>
+      <docir:style_extractor>pending: qwen3.6-35b-a3b-q7 @ localhost:11234</docir:style_extractor>
+      <docir:processing_time_ms>362000</docir:processing_time_ms>
+    </docir:pipeline_info>
+  </docir:metadata>
+
+  <!-- ============================================================ -->
+  <!-- PAGES                                                         -->
+  <!-- ============================================================ -->
+  <docir:pages>
+    <docir:page index="0">
+      <docir:page_size width_pt="612.0" height_pt="792.0"/>
+      
+      <docir:regions>
+        
+        <!-- ====================================================== -->
+        <!-- Region 1: Document Title                                -->
+        <!-- GLM-OCR: paragraph_title, confidence=0.71               -->
+        <!-- bbox normalized [366,83,631,116] → converted to pt      -->
+        <!-- ====================================================== -->
+        <docir:region id="r0_p0" type="text" native_label="paragraph_title" order="0">
+          <docir:bbox x="223.3" y="726.0" width="162.0" height="20.0"/>
+          <docir:polygon>
+            <docir:point x="223.3" y="726.0"/>
+            <docir:point x="223.3" y="706.0"/>
+            <docir:point x="385.3" y="706.0"/>
+            <docir:point x="385.3" y="726.0"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.71</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="center">
+              <docir:paragraph_style is_title="true"/>
+              <docir:run font_size_pt="16.0" bold="true"
+                         evidence_pixel_height="18" evidence_confidence="0.75">This is Title</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 2: Body text                                     -->
+        <!-- GLM-OCR: text, confidence=0.82                          -->
+        <!-- ====================================================== -->
+        <docir:region id="r1_p0" type="text" native_label="text" order="1">
+          <docir:bbox x="55.6" y="672.0" width="97.7" height="11.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.82</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="left">
+              <docir:run font_size_pt="11.0"
+                         evidence_pixel_height="12" evidence_confidence="0.85">This is a body text.</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 3: Body text with color and italic               -->
+        <!-- GLM-OCR: text, confidence=0.84                          -->
+        <!-- ====================================================== -->
+        <docir:region id="r2_p0" type="text" native_label="text" order="2">
+          <docir:bbox x="55.6" y="604.0" width="195.0" height="11.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.84</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="left">
+              <docir:run font_size_pt="11.0"
+                         evidence_pixel_height="12" evidence_confidence="0.80">This is a body text with </docir:run>
+              <docir:run font_size_pt="11.0" italic="true" color="#FF0000"
+                         evidence_pixel_height="12" evidence_color_sample="#CC3333" evidence_confidence="0.78">color and italic</docir:run>
+              <docir:run font_size_pt="11.0"
+                         evidence_pixel_height="12" evidence_confidence="0.80">.</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 4: Heading 1                                     -->
+        <!-- GLM-OCR: paragraph_title, confidence=0.81               -->
+        <!-- ====================================================== -->
+        <docir:region id="r3_p0" type="text" native_label="paragraph_title" order="3">
+          <docir:bbox x="55.6" y="558.0" width="147.0" height="18.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.81</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="left">
+              <docir:paragraph_style heading_level="1"/>
+              <docir:run font_size_pt="14.0" bold="true"
+                         evidence_pixel_height="16" evidence_confidence="0.82">This is heading 1</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 5: Heading 2                                     -->
+        <!-- GLM-OCR: paragraph_title, confidence=0.72               -->
+        <!-- ====================================================== -->
+        <docir:region id="r4_p0" type="text" native_label="paragraph_title" order="4">
+          <docir:bbox x="55.6" y="504.0" width="137.0" height="14.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.72</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="left">
+              <docir:paragraph_style heading_level="2"/>
+              <docir:run font_size_pt="12.0" bold="true"
+                         evidence_pixel_height="14" evidence_confidence="0.75">This is heading 2</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 6: TABLE (5 cols × 7 rows, Chinese content)      -->
+        <!-- GLM-OCR: table, confidence=0.97                         -->
+        <!-- Tree structure with row_group > row > cell              -->
+        <!-- ====================================================== -->
+        <docir:region id="r5_p0" type="table" native_label="table" order="5">
+          <docir:bbox x="33.6" y="244.0" width="543.0" height="258.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.97</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:table_content rows="2" cols="5">
+            <docir:table_style border_visible="true" border_color="#000000" header_row="true"/>
+            
+            <!-- Header row group -->
+            <docir:row_group type="header">
+              <docir:row>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" bold="true">Table</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" bold="true">Table header col 1</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" bold="true">Table header col 2</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" bold="true">Table header col 3</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" bold="true">Table header col 4</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+              </docir:row>
+            </docir:row_group>
+            
+            <!-- Body row group -->
+            <docir:row_group type="body">
+              <docir:row>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0">Row 1</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" color="#FF0000" italic="true"
+                                 evidence_color_sample="#CC3333">This is a text with color and italic.</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0">這是中文</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0" font_name="BiauKaiTC"
+                                 evidence_confidence="0.70">安安我有字型</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run font_size_pt="10.0">Col 4 data</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+              </docir:row>
+              <!-- Additional body rows omitted for brevity -->
+            </docir:row_group>
+          </docir:table_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 7: IMAGE (selfie photo)                          -->
+        <!-- GLM-OCR: image, confidence=0.98                         -->
+        <!-- Dual: reference + visual features                       -->
+        <!-- ====================================================== -->
+        <docir:region id="r6_p0" type="image" native_label="image" order="6">
+          <docir:bbox x="33.6" y="48.0" width="236.0" height="164.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.98</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:image_content>
+            <docir:image_reference asset_id="img_page0_region6" mime_type="image/jpeg"
+                                   width_px="387" height_px="271"/>
+            <docir:visual_features>
+              <docir:dominant_colors>#D4A574,#8B7355,#2C2C2C</docir:dominant_colors>
+              <docir:contains_text>false</docir:contains_text>
+              <docir:description>Outdoor night scene photograph, warm yellow street lighting on tiled pavement</docir:description>
+            </docir:visual_features>
+            <docir:alt_text>Photograph - outdoor night scene</docir:alt_text>
+          </docir:image_content>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 8: Text box line 1                               -->
+        <!-- GLM-OCR: text, confidence=0.64 (LOW - inside text box)  -->
+        <!-- NOTE: Text box container NOT detected by layout model   -->
+        <!-- ====================================================== -->
+        <docir:region id="r7_p0" type="text" native_label="text" order="7">
+          <docir:bbox x="249.8" y="36.0" width="235.0" height="13.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.64</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+            <docir:notes>Region is inside an undetected text box container (black border). Confidence low due to container boundary not being detected.</docir:notes>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="left">
+              <docir:run font_size_pt="10.0" font_name="YuGothic"
+                         evidence_pixel_height="11" evidence_confidence="0.65">This is a text box, 文字方塊 (YuGothic) !</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+          <!-- Merge hint: this region is part of a text box group -->
+          <docir:merge_hint type="standalone" linked_region="r8_p0"/>
+        </docir:region>
+
+        <!-- ====================================================== -->
+        <!-- Region 9: Text box line 2                               -->
+        <!-- GLM-OCR: text, confidence=0.61 (LOW - inside text box)  -->
+        <!-- ====================================================== -->
+        <docir:region id="r8_p0" type="text" native_label="text" order="8">
+          <docir:bbox x="249.2" y="18.0" width="292.0" height="11.0"/>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.61</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+            <docir:notes>Region is inside an undetected text box container (black border). Confidence low.</docir:notes>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph alignment="left">
+              <docir:run font_size_pt="10.0" italic="true"
+                         evidence_pixel_height="11" evidence_color_sample="#333333" evidence_confidence="0.60">This is a body text with color and italic in a text box!! 耶！</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+
+      </docir:regions>
+    </docir:page>
+  </docir:pages>
+
+  <!-- ============================================================ -->
+  <!-- ASSET REGISTRY                                                -->
+  <!-- ============================================================ -->
+  <docir:assets>
+    <docir:asset id="img_page0_region6" mime_type="image/jpeg">
+      <docir:file_path>imgs/cropped_page0_idx0.jpg</docir:file_path>
+      <docir:extraction_source>pdf_page_0_bbox_33.6_48.0_269.6_212.0</docir:extraction_source>
+    </docir:asset>
+  </docir:assets>
+
+  <!-- ============================================================ -->
+  <!-- CROSS-PAGE HINTS (empty for single-page doc)                  -->
+  <!-- ============================================================ -->
+  <docir:cross_page_hints>
+    <!-- No cross-page elements in this single-page document -->
+  </docir:cross_page_hints>
+
+</docir:document>

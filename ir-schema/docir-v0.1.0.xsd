@@ -1,0 +1,376 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DocIR Schema v0.1.0 — Document Intermediate Representation
+  
+  Design Principles:
+  - One-way pipeline: VLM output → DOCX generator input
+  - Coordinate system: PDF pt (1/72 inch), export converts to EMU
+  - Structure: Region-based top-level + inline paragraph/run structure
+  - Style: Dual-layer (computed values + visual evidence)
+  - Serialization: XML (tag-based, maps directly to OOXML)
+  - Validation: XSD schema + semantic validator
+  
+  Coordinate Units:
+  - bbox/polygon: PDF points (1/72 inch), origin at page bottom-left
+  - font-size: PDF points
+  - export converts to EMU (1 inch = 914400 EMU, 1 pt = 12700 EMU)
+-->
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:docir="urn:docir:v0.1"
+           targetNamespace="urn:docir:v0.1"
+           elementFormDefault="qualified">
+
+  <!-- ============================================================ -->
+  <!-- ROOT ELEMENT                                                  -->
+  <!-- ============================================================ -->
+  <xs:element name="document">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="metadata" type="docir:DocumentMetadata"/>
+        <xs:element name="pages" type="docir:Pages"/>
+        <xs:element name="assets" type="docir:AssetRegistry" minOccurs="0"/>
+        <xs:element name="cross_page_hints" type="docir:CrossPageHints" minOccurs="0"/>
+      </xs:sequence>
+      <xs:attribute name="version" type="xs:string" use="required" fixed="0.1.0"/>
+      <xs:attribute name="source_pdf" type="xs:string" use="optional"/>
+      <xs:attribute name="generated_at" type="xs:dateTime" use="required"/>
+      <xs:attribute name="generator" type="xs:string" use="required"/>
+    </xs:complexType>
+  </xs:element>
+
+  <!-- ============================================================ -->
+  <!-- DOCUMENT METADATA                                             -->
+  <!-- ============================================================ -->
+  <xs:complexType name="DocumentMetadata">
+    <xs:sequence>
+      <xs:element name="title" type="xs:string" minOccurs="0"/>
+      <xs:element name="author" type="xs:string" minOccurs="0"/>
+      <xs:element name="page_count" type="xs:positiveInteger"/>
+      <xs:element name="default_page_size" type="docir:PageSize"/>
+      <xs:element name="pipeline_info" type="docir:PipelineInfo"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="PageSize">
+    <xs:attribute name="width_pt" type="xs:decimal" use="required"/>
+    <xs:attribute name="height_pt" type="xs:decimal" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="PipelineInfo">
+    <xs:sequence>
+      <xs:element name="layout_detector" type="xs:string"/>
+      <xs:element name="ocr_engine" type="xs:string"/>
+      <xs:element name="style_extractor" type="xs:string" minOccurs="0"/>
+      <xs:element name="processing_time_ms" type="xs:positiveInteger" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- PAGES                                                         -->
+  <!-- ============================================================ -->
+  <xs:complexType name="Pages">
+    <xs:sequence>
+      <xs:element name="page" type="docir:Page" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Page">
+    <xs:sequence>
+      <xs:element name="page_size" type="docir:PageSize" minOccurs="0"/>
+      <xs:element name="regions" type="docir:Regions"/>
+    </xs:sequence>
+    <xs:attribute name="index" type="xs:nonNegativeInteger" use="required"/>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- REGIONS (Top-level layout elements)                           -->
+  <!-- ============================================================ -->
+  <xs:complexType name="Regions">
+    <xs:sequence>
+      <xs:element name="region" type="docir:Region" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Region" abstract="false">
+    <xs:sequence>
+      <!-- Geometry -->
+      <xs:element name="bbox" type="docir:BBox"/>
+      <xs:element name="polygon" type="docir:Polygon" minOccurs="0"/>
+      
+      <!-- Provenance -->
+      <xs:element name="provenance" type="docir:Provenance"/>
+      
+      <!-- Content (polymorphic by region_type) -->
+      <xs:choice>
+        <xs:element name="text_content" type="docir:TextContent"/>
+        <xs:element name="table_content" type="docir:TableContent"/>
+        <xs:element name="image_content" type="docir:ImageContent"/>
+        <xs:element name="formula_content" type="docir:FormulaContent"/>
+      </xs:choice>
+      
+      <!-- Cross-page hints -->
+      <xs:element name="merge_hint" type="docir:MergeHint" minOccurs="0"/>
+    </xs:sequence>
+    
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+    <xs:attribute name="type" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="text"/>
+          <xs:enumeration value="table"/>
+          <xs:enumeration value="image"/>
+          <xs:enumeration value="formula"/>
+          <xs:enumeration value="chart"/>
+          <xs:enumeration value="seal"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="native_label" type="xs:string" use="optional"/>
+    <xs:attribute name="order" type="xs:nonNegativeInteger" use="required"/>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- GEOMETRY                                                      -->
+  <!-- ============================================================ -->
+  <xs:complexType name="BBox">
+    <xs:attribute name="x" type="xs:decimal" use="required"/>
+    <xs:attribute name="y" type="xs:decimal" use="required"/>
+    <xs:attribute name="width" type="xs:decimal" use="required"/>
+    <xs:attribute name="height" type="xs:decimal" use="required"/>
+    <!-- Units: PDF points (1/72 inch) -->
+  </xs:complexType>
+
+  <xs:complexType name="Polygon">
+    <xs:sequence>
+      <xs:element name="point" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:attribute name="x" type="xs:decimal" use="required"/>
+          <xs:attribute name="y" type="xs:decimal" use="required"/>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- PROVENANCE (Debugging & Observability)                        -->
+  <!-- ============================================================ -->
+  <xs:complexType name="Provenance">
+    <xs:sequence>
+      <xs:element name="source" type="xs:string"/>
+      <xs:element name="confidence" type="xs:decimal" minOccurs="0"/>
+      <xs:element name="processing_time_ms" type="xs:positiveInteger" minOccurs="0"/>
+      <xs:element name="detection_model" type="xs:string" minOccurs="0"/>
+      <xs:element name="style_extractor" type="xs:string" minOccurs="0"/>
+      <xs:element name="style_extraction_time_ms" type="xs:positiveInteger" minOccurs="0"/>
+      <xs:element name="notes" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- TEXT CONTENT (Hybrid: Semantic paragraphs + positional runs)  -->
+  <!-- ============================================================ -->
+  <xs:complexType name="TextContent">
+    <xs:sequence>
+      <xs:element name="paragraph" type="docir:Paragraph" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Paragraph">
+    <xs:sequence>
+      <!-- Paragraph-level style -->
+      <xs:element name="paragraph_style" type="docir:ParagraphStyle" minOccurs="0"/>
+      <!-- Runs (positional, left-to-right, top-to-bottom) -->
+      <xs:element name="run" type="docir:Run" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="optional"/>
+    <xs:attribute name="alignment" type="docir:Alignment" use="optional"/>
+    <xs:attribute name="indent_pt" type="xs:decimal" use="optional"/>
+    <xs:attribute name="spacing_before_pt" type="xs:decimal" use="optional"/>
+    <xs:attribute name="spacing_after_pt" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="Run">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="id" type="xs:ID" use="optional"/>
+        <!-- Computed style (VLM inference) -->
+        <xs:attribute name="font_name" type="xs:string" use="optional"/>
+        <xs:attribute name="font_size_pt" type="xs:decimal" use="optional"/>
+        <xs:attribute name="bold" type="xs:boolean" use="optional"/>
+        <xs:attribute name="italic" type="xs:boolean" use="optional"/>
+        <xs:attribute name="underline" type="xs:boolean" use="optional"/>
+        <xs:attribute name="color" type="xs:string" use="optional"/>
+        <!-- Evidence (visual observations) -->
+        <xs:attribute name="evidence_pixel_height" type="xs:decimal" use="optional"/>
+        <xs:attribute name="evidence_color_sample" type="xs:string" use="optional"/>
+        <xs:attribute name="evidence_confidence" type="xs:decimal" use="optional"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <xs:complexType name="ParagraphStyle">
+    <xs:attribute name="style_name" type="xs:string" use="optional"/>
+    <xs:attribute name="heading_level" type="xs:positiveInteger" use="optional"/>
+    <xs:attribute name="is_title" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:simpleType name="Alignment">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="left"/>
+      <xs:enumeration value="center"/>
+      <xs:enumeration value="right"/>
+      <xs:enumeration value="justify"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- ============================================================ -->
+  <!-- TABLE CONTENT (Tree structure, supports nested tables)        -->
+  <!-- ============================================================ -->
+  <xs:complexType name="TableContent">
+    <xs:sequence>
+      <xs:element name="table_style" type="docir:TableStyle" minOccurs="0"/>
+      <xs:element name="row_group" type="docir:RowGroup" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="rows" type="xs:positiveInteger" use="required"/>
+    <xs:attribute name="cols" type="xs:positiveInteger" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="TableStyle">
+    <xs:attribute name="border_visible" type="xs:boolean" use="optional"/>
+    <xs:attribute name="border_color" type="xs:string" use="optional"/>
+    <xs:attribute name="header_row" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="RowGroup">
+    <xs:sequence>
+      <xs:element name="row" type="docir:TableRow" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="type" use="optional">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="header"/>
+          <xs:enumeration value="body"/>
+          <xs:enumeration value="footer"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="TableRow">
+    <xs:sequence>
+      <xs:element name="cell" type="docir:TableCell" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="height_pt" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="TableCell">
+    <xs:sequence>
+      <!-- Cell content can be text or nested table -->
+      <xs:choice>
+        <xs:element name="text_content" type="docir:TextContent"/>
+        <xs:element name="table_content" type="docir:TableContent"/>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="row_span" type="xs:positiveInteger" use="optional" default="1"/>
+    <xs:attribute name="col_span" type="xs:positiveInteger" use="optional" default="1"/>
+    <xs:attribute name="background_color" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- IMAGE CONTENT (Reference + visual features)                   -->
+  <!-- ============================================================ -->
+  <xs:complexType name="ImageContent">
+    <xs:sequence>
+      <xs:element name="image_reference" type="docir:ImageReference"/>
+      <xs:element name="visual_features" type="docir:VisualFeatures" minOccurs="0"/>
+      <xs:element name="caption" type="xs:string" minOccurs="0"/>
+      <xs:element name="alt_text" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="ImageReference">
+    <xs:attribute name="asset_id" type="xs:string" use="required"/>
+    <xs:attribute name="mime_type" type="xs:string" use="required"/>
+    <xs:attribute name="width_px" type="xs:positiveInteger" use="optional"/>
+    <xs:attribute name="height_px" type="xs:positiveInteger" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="VisualFeatures">
+    <xs:sequence>
+      <xs:element name="dominant_colors" type="xs:string" minOccurs="0"/>
+      <xs:element name="chart_type" type="xs:string" minOccurs="0"/>
+      <xs:element name="contains_text" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="description" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- FORMULA CONTENT                                               -->
+  <!-- ============================================================ -->
+  <xs:complexType name="FormulaContent">
+    <xs:sequence>
+      <xs:element name="latex" type="xs:string" minOccurs="0"/>
+      <xs:element name="mathml" type="xs:string" minOccurs="0"/>
+      <xs:element name="raw_text" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="display" type="xs:boolean" use="optional"/>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- CROSS-PAGE HINTS                                              -->
+  <!-- ============================================================ -->
+  <xs:complexType name="CrossPageHints">
+    <xs:sequence>
+      <xs:element name="hint" type="docir:CrossPageHint" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CrossPageHint">
+    <xs:attribute name="type" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="table_continuation"/>
+          <xs:enumeration value="paragraph_continuation"/>
+          <xs:enumeration value="same_logical_element"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="from_region" type="xs:string" use="required"/>
+    <xs:attribute name="to_region" type="xs:string" use="required"/>
+    <xs:attribute name="confidence" type="xs:decimal" use="optional"/>
+  </xs:complexType>
+
+  <xs:complexType name="MergeHint">
+    <xs:attribute name="type" use="required">
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:enumeration value="continues_on_next_page"/>
+          <xs:enumeration value="continued_from_previous"/>
+          <xs:enumeration value="standalone"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="linked_region" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <!-- ============================================================ -->
+  <!-- ASSET REGISTRY                                                -->
+  <!-- ============================================================ -->
+  <xs:complexType name="AssetRegistry">
+    <xs:sequence>
+      <xs:element name="asset" type="docir:Asset" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="Asset">
+    <xs:sequence>
+      <xs:element name="file_path" type="xs:string"/>
+      <xs:element name="extraction_source" type="xs:string" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+    <xs:attribute name="mime_type" type="xs:string" use="required"/>
+    <xs:attribute name="width_px" type="xs:positiveInteger" use="optional"/>
+    <xs:attribute name="height_px" type="xs:positiveInteger" use="optional"/>
+  </xs:complexType>
+
+</xs:schema>

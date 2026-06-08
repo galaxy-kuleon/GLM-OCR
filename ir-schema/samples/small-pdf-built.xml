@@ -1,0 +1,207 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<docir:document xmlns:docir="urn:docir:v0.1" version="0.1.0" source_pdf="doc_123c1995a949_small.pdf" generated_at="2026-06-08T23:11:25.351369" generator="ir-builder-v0.1.0">
+  <docir:metadata>
+    <docir:title>Small Test Document</docir:title>
+    <docir:page_count>1</docir:page_count>
+    <docir:default_page_size width_pt="595.30" height_pt="841.89"/>
+    <docir:pipeline_info>
+      <docir:layout_detector>PP-DocLayoutV3</docir:layout_detector>
+      <docir:ocr_engine>Ollama glm-ocr:latest</docir:ocr_engine>
+      <docir:style_extractor>pending</docir:style_extractor>
+    </docir:pipeline_info>
+  </docir:metadata>
+  <docir:pages>
+    <docir:page index="0">
+      <docir:page_size width_pt="595.30" height_pt="841.89"/>
+      <docir:regions>
+        <docir:region id="r0_p0" type="text" native_label="paragraph_title" order="0">
+          <docir:bbox x="217.88" y="772.01" width="157.76" height="27.78"/>
+          <docir:polygon>
+            <docir:point x="217.88" y="772.01"/>
+            <docir:point x="217.88" y="745.07"/>
+            <docir:point x="375.04" y="745.07"/>
+            <docir:point x="375.04" y="772.01"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run>This is Title</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+        <docir:region id="r1_p0" type="text" native_label="text" order="1">
+          <docir:bbox x="54.17" y="713.08" width="95.25" height="15.15"/>
+          <docir:polygon>
+            <docir:point x="54.17" y="713.08"/>
+            <docir:point x="54.17" y="698.77"/>
+            <docir:point x="148.83" y="698.77"/>
+            <docir:point x="148.83" y="713.08"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run>This is a body text.</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+        <docir:region id="r2_p0" type="text" native_label="text" order="2">
+          <docir:bbox x="54.17" y="690.35" width="194.07" height="15.15"/>
+          <docir:polygon>
+            <docir:point x="54.17" y="690.35"/>
+            <docir:point x="54.17" y="676.04"/>
+            <docir:point x="247.65" y="676.04"/>
+            <docir:point x="247.65" y="690.35"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run></docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+        <docir:region id="r3_p0" type="text" native_label="paragraph_title" order="3">
+          <docir:bbox x="54.77" y="654.99" width="148.83" height="21.05"/>
+          <docir:polygon>
+            <docir:point x="54.77" y="654.99"/>
+            <docir:point x="54.77" y="634.78"/>
+            <docir:point x="203.59" y="634.78"/>
+            <docir:point x="203.59" y="654.99"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run></docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+        <docir:region id="r4_p0" type="text" native_label="paragraph_title" order="4">
+          <docir:bbox x="54.17" y="617.95" width="133.94" height="18.52"/>
+          <docir:polygon>
+            <docir:point x="54.17" y="617.95"/>
+            <docir:point x="54.17" y="599.43"/>
+            <docir:point x="188.12" y="599.43"/>
+            <docir:point x="188.12" y="617.95"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run>This is heading 2</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+        <docir:region id="r5_p0" type="table" native_label="table" order="5">
+          <docir:bbox x="55.96" y="571.64" width="481.60" height="141.44"/>
+          <docir:polygon>
+            <docir:point x="55.96" y="571.64"/>
+            <docir:point x="55.96" y="431.05"/>
+            <docir:point x="537.56" y="431.05"/>
+            <docir:point x="537.56" y="571.64"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:table_content rows="1" cols="1">
+            <docir:row_group type="body">
+              <docir:row>
+                <docir:cell>
+                  <docir:text_content>
+                    <docir:paragraph>
+                      <docir:run>[Table content]</docir:run>
+                    </docir:paragraph>
+                  </docir:text_content>
+                </docir:cell>
+              </docir:row>
+            </docir:row_group>
+          </docir:table_content>
+        </docir:region>
+        <docir:region id="r6_p0" type="image" native_label="image" order="6">
+          <docir:bbox x="32.74" y="397.37" width="230.38" height="228.15"/>
+          <docir:polygon>
+            <docir:point x="32.74" y="397.37"/>
+            <docir:point x="32.74" y="169.22"/>
+            <docir:point x="262.53" y="169.22"/>
+            <docir:point x="262.53" y="397.37"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:image_content>
+            <docir:image_reference asset_id="img_page0_region6" mime_type="image/jpeg"/>
+            <docir:visual_features>
+              <docir:contains_text>false</docir:contains_text>
+            </docir:visual_features>
+          </docir:image_content>
+        </docir:region>
+        <docir:region id="r7_p0" type="text" native_label="text" order="7">
+          <docir:bbox x="243.48" y="137.23" width="229.79" height="17.68"/>
+          <docir:polygon>
+            <docir:point x="243.48" y="137.23"/>
+            <docir:point x="243.48" y="119.55"/>
+            <docir:point x="473.27" y="119.55"/>
+            <docir:point x="473.27" y="137.23"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run>This is a text box, 文字方塊 (YuGothic) !</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+        <docir:region id="r8_p0" type="text" native_label="text" order="8">
+          <docir:bbox x="242.88" y="107.76" width="285.75" height="15.15"/>
+          <docir:polygon>
+            <docir:point x="242.88" y="107.76"/>
+            <docir:point x="242.88" y="92.61"/>
+            <docir:point x="528.03" y="92.61"/>
+            <docir:point x="528.03" y="107.76"/>
+          </docir:polygon>
+          <docir:provenance>
+            <docir:source>glm-ocr-pipeline</docir:source>
+            <docir:confidence>0.85</docir:confidence>
+            <docir:detection_model>PP-DocLayoutV3</docir:detection_model>
+          </docir:provenance>
+          <docir:text_content>
+            <docir:paragraph>
+              <docir:run>This is a body text with color and italic in a text box!! 耶！</docir:run>
+            </docir:paragraph>
+          </docir:text_content>
+        </docir:region>
+      </docir:regions>
+    </docir:page>
+  </docir:pages>
+  <docir:assets>
+    <docir:asset id="img_page0_region6" mime_type="image/jpeg">
+      <docir:file_path>imgs/cropped_page0_idx6.jpg</docir:file_path>
+      <docir:extraction_source>pdf_page_0_region_6</docir:extraction_source>
+    </docir:asset>
+  </docir:assets>
+  <docir:cross_page_hints/>
+</docir:document>
