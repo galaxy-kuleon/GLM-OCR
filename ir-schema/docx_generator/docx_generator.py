@@ -330,6 +330,22 @@ def add_positioned_text_region(doc: Document, region_elem, page_height_pt: float
         if alignment:
             set_paragraph_alignment(para, alignment)
         
+        # Line spacing from computed_style
+        if region_elem is not None:
+            computed_style = region_elem.find(f'{{{DOCIR_NS}}}computed_style')
+            if computed_style is not None:
+                lh_elem = computed_style.find(f'{{{DOCIR_NS}}}line_height')
+                font_elem = computed_style.find(f'{{{DOCIR_NS}}}font')
+                if lh_elem is not None and font_elem is not None:
+                    try:
+                        lh_pt = float(lh_elem.get('pt', '0'))
+                        font_size = float(font_elem.get('size_pt', '0'))
+                        if lh_pt > 0 and font_size > 0:
+                            # Set line spacing as multiple of font size
+                            para.paragraph_format.line_spacing = lh_pt / font_size
+                    except ValueError:
+                        pass
+        
         # Process each run
         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
             text = run_elem.text or ''
@@ -880,6 +896,21 @@ def process_text_region(doc: Document, region_elem):
                     alignment = align_elem.get('value')
         if alignment:
             set_paragraph_alignment(para, alignment)
+        
+        # Line spacing from computed_style
+        if region_elem is not None:
+            computed_style = region_elem.find(f'{{{DOCIR_NS}}}computed_style')
+            if computed_style is not None:
+                lh_elem = computed_style.find(f'{{{DOCIR_NS}}}line_height')
+                font_elem = computed_style.find(f'{{{DOCIR_NS}}}font')
+                if lh_elem is not None and font_elem is not None:
+                    try:
+                        lh_pt = float(lh_elem.get('pt', '0'))
+                        font_size = float(font_elem.get('size_pt', '0'))
+                        if lh_pt > 0 and font_size > 0:
+                            para.paragraph_format.line_spacing = lh_pt / font_size
+                    except ValueError:
+                        pass
         
         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
             text = run_elem.text or ''

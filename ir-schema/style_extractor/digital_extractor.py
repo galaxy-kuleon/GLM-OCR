@@ -304,15 +304,32 @@ def extract_region_style_digital(
     # More accurate: use the actual line spacing from the PDF
     line_height_pt = font_size * 1.2  # Default estimate
     
-    # Try to get actual line spacing from consecutive lines
-    if len(all_spans) > 1:
-        # Get unique y positions
-        y_positions = sorted(set(span.get("origin", [0, 0])[1] for span in all_spans))
-        if len(y_positions) > 1:
-            # Average line spacing
-            spacings = [y_positions[i+1] - y_positions[i] for i in range(len(y_positions)-1)]
-            if spacings:
-                line_height_pt = sum(spacings) / len(spacings)
+    # Calculate line height from font metrics
+    # Use line bboxes for more accurate measurement
+    # text_dict is already fetched above for style extraction
+    line_y_positions = []
+    for block in text_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            bbox = line.get("bbox")
+            if bbox:
+                # Use the top of the line bbox (y0)
+                line_y_positions.append(bbox[1])
+    
+    if len(line_y_positions) > 1:
+        # Sort by y position (top to bottom)
+        line_y_positions.sort()
+        # Calculate spacing between consecutive lines
+        spacings = [line_y_positions[i+1] - line_y_positions[i] 
+                   for i in range(len(line_y_positions)-1)]
+        # Filter out large gaps (paragraph breaks) - keep only normal line spacing
+        if spacings:
+            median_spacing = sorted(spacings)[len(spacings)//2]
+            # Keep spacings within 50% of median (filters paragraph breaks)
+            normal_spacings = [s for s in spacings if abs(s - median_spacing) < median_spacing * 0.5]
+            if normal_spacings:
+                line_height_pt = sum(normal_spacings) / len(normal_spacings)
     
     # Character spacing (from text positioning)
     # This is complex — for now, use default (0)
