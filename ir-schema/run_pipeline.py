@@ -90,6 +90,12 @@ def main():
         help='Also extract table styles (borders, headers) via VLM'
     )
     parser.add_argument(
+        '--digital',
+        action='store_true',
+        help='Use digital PDF fast path (exact fonts from PDF, no VLM). '
+             'Automatically detects digital vs scanned pages.'
+    )
+    parser.add_argument(
         '--parallel',
         type=int,
         default=1,
@@ -185,22 +191,35 @@ def main():
     docir_styled = work_dir / f'{args.input_pdf.stem}-styled.docir.xml'
     
     if not args.skip_style:
-        style_extractor_cmd = [
-            sys.executable,
-            str(script_dir / 'style_extractor' / 'style_extractor.py'),
-            str(docir_xml),
-            str(args.input_pdf),
-            '-o', str(docir_styled),
-            '--dpi', str(args.dpi)
-        ]
-        
-        if args.table_styles:
-            style_extractor_cmd.append('--table-styles')
-        
-        if args.parallel > 1:
-            style_extractor_cmd.extend(['--parallel', str(args.parallel)])
-        
-        run_command(style_extractor_cmd, "Step 3: Style Extraction")
+        if args.digital:
+            # Digital PDF fast path: exact fonts from PDF, no VLM
+            style_extractor_cmd = [
+                sys.executable,
+                str(script_dir / 'style_extractor' / 'digital_extractor.py'),
+                str(docir_xml),
+                str(args.input_pdf),
+                '-o', str(docir_styled),
+                '--dpi', str(args.dpi)
+            ]
+            run_command(style_extractor_cmd, "Step 3: Style Extraction (digital fast path)")
+        else:
+            # VLM-based style extraction (for scanned PDFs)
+            style_extractor_cmd = [
+                sys.executable,
+                str(script_dir / 'style_extractor' / 'style_extractor.py'),
+                str(docir_xml),
+                str(args.input_pdf),
+                '-o', str(docir_styled),
+                '--dpi', str(args.dpi)
+            ]
+            
+            if args.table_styles:
+                style_extractor_cmd.append('--table-styles')
+            
+            if args.parallel > 1:
+                style_extractor_cmd.extend(['--parallel', str(args.parallel)])
+            
+            run_command(style_extractor_cmd, "Step 3: Style Extraction (VLM)")
         
         final_docir = docir_styled
     else:

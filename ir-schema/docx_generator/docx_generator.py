@@ -22,6 +22,8 @@ from docx import Document
 from docx.shared import Pt, RGBColor, Inches, Emu
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.section import WD_ORIENT
+from docx.oxml.ns import qn, nsdecls
+from docx.oxml import parse_xml
 
 
 # DocIR namespace
@@ -49,44 +51,177 @@ def hex_to_rgb(hex_color: str) -> Optional[RGBColor]:
         return None
 
 
-def apply_run_style(run, run_elem):
-    """Apply style attributes from DocIR run element to python-docx run."""
+def set_char_scaling(run, scale: float):
+    """
+    Set character scaling (horizontal stretch/compress).
+    
+    Args:
+        run: python-docx Run object
+        scale: Scaling factor (1.0 = 100% = normal, 0.5 = 50%, 2.0 = 200%)
+    """
+    # w:w value is in percent (100 = normal)
+    scale_percent = int(100 * scale)
+    xml = f'<w:w {nsdecls("w")} w:val="{scale_percent}"/>'
+    run._r.get_or_add_rPr().insert(0, parse_xml(xml))
+
+
+def set_char_spacing(run, spacing_pt: float):
+    """
+    Set character spacing (kerning).
+    
+    Args:
+        run: python-docx Run object
+        spacing_pt: Spacing in points (positive = expand, negative = condense)
+    """
+    # w:spacing value is in half-points (20 twips = 1 point)
+    spacing_twips = int(20 * spacing_pt)
+    xml = f'<w:spacing {nsdecls("w")} w:val="{spacing_twips}"/>'
+    run._r.get_or_add_rPr().insert(0, parse_xml(xml))
+
+
+def set_char_shading(run, color_hex: str):
+    """
+    Set character background shading.
+    
+    Args:
+        run: python-docx Run object
+        color_hex: Hex color string (#RRGGBB)
+    """
+    if not color_hex or not color_hex.startswith('#'):
+        return
+    
+    color = color_hex.lstrip('#')
+    if len(color) != 6:
+        return
+    
+    xml = f'<w:shd {nsdecls("w")} w:val="clear" w:color="auto" w:fill="{color}"/>'
+    run._r.get_or_add_rPr().insert(0, parse_xml(xml))
+
+
+def set_underline_color(run, color_hex: str):
+    """
+    Set underline with specific color.
+    
+    Args:
+        run: python-docx Run object
+        color_hex: Hex color string (#RRGGBB)
+    """
+    if not color_hex or not color_hex.startswith('#'):
+        return
+    
+    color = color_hex.lstrip('#')
+    if len(color) != 6:
+        return
+    
+    xml = f'<w:u {nsdecls("w")} w:val="single" w:color="{color}"/>'
+    run._r.get_or_add_rPr().insert(0, parse_xml(xml))
+
+
+def apply_run_style(run, run_elem, region_elem=None):
+    """Apply style attributes from DocIR run element to python-docx run.
+    
+    Priority:
+    1. Run-level attributes (font_name, font_size_pt, etc.)
+    2. Region-level computed_style (from digital_extractor or style_extractor)
+    """
     font = run.font
     
-    # Font name
+    # First, try to get styles from region's computed_style
+    computed_style = None
+    if region_elem is not None:
+        computed_style = region_elem.find(f'{{{DOCIR_NS}}}computed_style')
+    
+    # Font name (run attr > computed_style > default)
     font_name = run_elem.get('font_name')
+    if not font_name and computed_style is not None:
+        font_elem = computed_style.find(f'{{{DOCIR_NS}}}font')
+        if font_elem is not None:
+            font_name = font_elem.get('family') or font_elem.get('name')
     if font_name:
         font.name = font_name
     
-    # Font size (in points)
+    # Font size (run attr > computed_style > default)
     font_size_pt = run_elem.get('font_size_pt')
+    if not font_size_pt and computed_style is not None:
+        font_elem = computed_style.find(f'{{{DOCIR_NS}}}font')
+        if font_elem is not None:
+            font_size_pt = font_elem.get('size_pt')
     if font_size_pt:
         try:
             font.size = Pt(float(font_size_pt))
         except ValueError:
             pass
     
-    # Bold
+    # Bold (run attr > computed_style > default)
     bold = run_elem.get('bold')
+    if not bold and computed_style is not None:
+        font_elem = computed_style.find(f'{{{DOCIR_NS}}}font')
+        if font_elem is not None:
+            bold = font_elem.get('bold')
     if bold:
         font.bold = bold.lower() == 'true'
     
-    # Italic
+    # Italic (run attr > computed_style > default)
     italic = run_elem.get('italic')
+    if not italic and computed_style is not None:
+        font_elem = computed_style.find(f'{{{DOCIR_NS}}}font')
+        if font_elem is not None:
+            italic = font_elem.get('italic')
     if italic:
         font.italic = italic.lower() == 'true'
     
-    # Underline
+    # Underline (run attr only for now)
     underline = run_elem.get('underline')
     if underline:
         font.underline = underline.lower() == 'true'
     
-    # Color
+    # Color (run attr > computed_style > default)
     color = run_elem.get('color')
+    if not color and computed_style is not None:
+        color_elem = computed_style.find(f'{{{DOCIR_NS}}}color')
+        if color_elem is not None:
+            color = color_elem.get('value')
     if color:
         rgb = hex_to_rgb(color)
         if rgb:
             font.color.rgb = rgb
+    
+    # Rich formatting properties (from computed_style only)
+    if computed_style is not None:
+        # Character scaling (horizontal stretch)
+        scale_elem = computed_style.find(f'{{{DOCIR_NS}}}text_scale')
+        if scale_elem is not None:
+            scale_val = scale_elem.get('percent')
+            if scale_val:
+                try:
+                    scale_factor = float(scale_val) / 100.0
+                    set_char_scaling(run, scale_factor)
+                except ValueError:
+                    pass
+        
+        # Character spacing (kerning)
+        spacing_elem = computed_style.find(f'{{{DOCIR_NS}}}char_spacing')
+        if spacing_elem is not None:
+            spacing_pt = spacing_elem.get('pt')
+            if spacing_pt:
+                try:
+                    set_char_spacing(run, float(spacing_pt))
+                except ValueError:
+                    pass
+        
+        # Character shading (background color)
+        shading_elem = computed_style.find(f'{{{DOCIR_NS}}}shading')
+        if shading_elem is not None:
+            shading_color = shading_elem.get('fill')
+            if shading_color:
+                set_char_shading(run, shading_color)
+        
+        # Underline with color
+        underline_color_elem = computed_style.find(f'{{{DOCIR_NS}}}underline_color')
+        if underline_color_elem is not None:
+            ul_color = underline_color_elem.get('value')
+            if ul_color:
+                set_underline_color(run, ul_color)
 
 
 def set_paragraph_alignment(paragraph, alignment_str: str):
@@ -194,7 +329,7 @@ def add_positioned_text_region(doc: Document, region_elem, page_height_pt: float
             text = run_elem.text or ''
             if text:
                 run = para.add_run(text)
-                apply_run_style(run, run_elem)
+                apply_run_style(run, run_elem, region_elem)
         
         # After first paragraph, reset space_before for subsequent paragraphs
         space_before_pt = 0
@@ -296,7 +431,7 @@ def add_floating_text_box(doc: Document, region_elem, page_height_pt: float, cur
             text = run_elem.text or ''
             if text:
                 run = para.add_run(text)
-                apply_run_style(run, run_elem)
+                apply_run_style(run, run_elem, region_elem)
     
     # Return the bottom of this region
     return top_from_page_top_pt + h_pt
@@ -425,7 +560,7 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
                             text = run_elem.text or ''
                             run = para.add_run(text)
-                            apply_run_style(run, run_elem)
+                            apply_run_style(run, run_elem, region_elem)
                     
                     if len(cell.paragraphs) > 1 and not cell.paragraphs[0].text:
                         p = cell.paragraphs[0]._element
@@ -470,7 +605,7 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
                             text = run_elem.text or ''
                             run = para.add_run(text)
-                            apply_run_style(run, run_elem)
+                            apply_run_style(run, run_elem, region_elem)
                     
                     if len(cell.paragraphs) > 1 and not cell.paragraphs[0].text:
                         p = cell.paragraphs[0]._element
@@ -572,7 +707,7 @@ def process_text_region(doc: Document, region_elem):
         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
             text = run_elem.text or ''
             run = para.add_run(text)
-            apply_run_style(run, run_elem)
+            apply_run_style(run, run_elem, region_elem)
 
 
 def process_table_region(doc: Document, region_elem):
@@ -649,7 +784,7 @@ def process_table_region(doc: Document, region_elem):
                         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
                             text = run_elem.text or ''
                             run = para.add_run(text)
-                            apply_run_style(run, run_elem)
+                            apply_run_style(run, run_elem, region_elem)
                     
                     if len(cell.paragraphs) > 1 and not cell.paragraphs[0].text:
                         p = cell.paragraphs[0]._element
@@ -693,7 +828,7 @@ def process_table_region(doc: Document, region_elem):
                         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
                             text = run_elem.text or ''
                             run = para.add_run(text)
-                            apply_run_style(run, run_elem)
+                            apply_run_style(run, run_elem, region_elem)
                     
                     if len(cell.paragraphs) > 1 and not cell.paragraphs[0].text:
                         p = cell.paragraphs[0]._element
