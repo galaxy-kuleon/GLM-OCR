@@ -512,6 +512,46 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
         
         tblPr.append(borders)
     
+    # Helper: apply per-cell borders from cell_borders element
+    def apply_cell_borders(cell_elem, cell):
+        """Apply per-cell border styling from DocIR cell_borders element."""
+        cell_borders_elem = cell_elem.find(f'{{{DOCIR_NS}}}cell_borders')
+        if cell_borders_elem is None:
+            return
+        
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        
+        tc = cell._tc
+        tcPr = tc.tcPr if tc.tcPr is not None else OxmlElement('w:tcPr')
+        if tc.tcPr is None:
+            tc.insert(0, tcPr)
+        
+        tcBorders = OxmlElement('w:tcBorders')
+        has_borders = False
+        
+        for edge in ['top', 'bottom', 'left', 'right']:
+            border_elem = cell_borders_elem.find(f'{{{DOCIR_NS}}}border_{edge}')
+            if border_elem is not None:
+                has_borders = True
+                border = OxmlElement(f'w:{edge}')
+                
+                style = border_elem.get('style', 'single')
+                border.set(qn('w:val'), style)
+                
+                # Width in eighths of a point (0.5pt = 4)
+                width_pt = float(border_elem.get('width', '0.5'))
+                border.set(qn('w:sz'), str(int(width_pt * 8)))
+                border.set(qn('w:space'), '0')
+                
+                color = border_elem.get('color', '#000000').lstrip('#')
+                border.set(qn('w:color'), color)
+                
+                tcBorders.append(border)
+        
+        if has_borders:
+            tcPr.append(tcBorders)
+    
     # Set table indent for horizontal positioning
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
@@ -571,6 +611,9 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         for run in para.runs:
                             run.font.bold = True
                 
+                # Apply per-cell borders if present
+                apply_cell_borders(cell_elem, cell)
+                
                 col_idx += col_span
             
             row_idx += 1
@@ -611,6 +654,9 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         p = cell.paragraphs[0]._element
                         p.getparent().remove(p)
                 
+                # Apply per-cell borders if present
+                apply_cell_borders(cell_elem, cell)
+                
                 col_idx += col_span
             
             row_idx += 1
@@ -618,9 +664,128 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
     return top_from_page_top_pt + h_pt
 
 
+def add_anchored_image(paragraph, image_path: str, left_pt: float, top_pt: float, width_pt: float, height_pt: float):
+    """
+    Add an image with absolute positioning using wp:anchor.
+    
+    This creates a floating image anchored to the page with precise coordinates,
+    similar to how pdf2docx positions images.
+    
+    Args:
+        paragraph: The paragraph to add the image to
+        image_path: Path to the image file
+        left_pt: Left position from page left edge (in points)
+        top_pt: Top position from page top edge (in points)
+        width_pt: Image width (in points)
+        height_pt: Image height (in points)
+    """
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    from docx.shared import Emu
+    import hashlib
+    
+    # Convert points to EMU (1 point = 12700 EMU)
+    left_emu = int(left_pt * 12700)
+    top_emu = int(top_pt * 12700)
+    width_emu = int(width_pt * 12700)
+    height_emu = int(height_pt * 12700)
+    
+    # Generate a unique ID for the image
+    with open(image_path, 'rb') as f:
+        img_hash = hashlib.md5(f.read()).hexdigest()[:8]
+    image_id = int(img_hash, 16) % 100000
+    
+    # Get the run element
+    run = paragraph.add_run()
+    run_elem = run._r
+    
+    # First add the picture inline to create the relationship
+    inline_shape = run.add_picture(image_path, width=Emu(width_emu), height=Emu(height_emu))
+    
+    # Find the w:drawing element that was created
+    drawing = run_elem.find(qn('w:drawing'))
+    if drawing is None:
+        return
+    
+    # Find wp:inline inside w:drawing
+    wp_inline = drawing.find(qn('wp:inline'))
+    if wp_inline is None:
+        return
+    
+    # Create wp:anchor element
+    anchor = OxmlElement('wp:anchor')
+    anchor.set('distT', '0')
+    anchor.set('distB', '0')
+    anchor.set('distL', '0')
+    anchor.set('distR', '0')
+    anchor.set('simplePos', '0')
+    anchor.set('relativeHeight', '0')
+    anchor.set('behindDoc', '0')
+    anchor.set('locked', '0')
+    anchor.set('layoutInCell', '1')
+    anchor.set('allowOverlap', '1')
+    
+    # wp:simplePos (not used but required)
+    simplePos = OxmlElement('wp:simplePos')
+    simplePos.set('x', '0')
+    simplePos.set('y', '0')
+    anchor.append(simplePos)
+    
+    # wp:positionH (horizontal position relative to page)
+    positionH = OxmlElement('wp:positionH')
+    positionH.set('relativeFrom', 'page')
+    posOffset = OxmlElement('wp:posOffset')
+    posOffset.text = str(left_emu)
+    positionH.append(posOffset)
+    anchor.append(positionH)
+    
+    # wp:positionV (vertical position relative to page)
+    positionV = OxmlElement('wp:positionV')
+    positionV.set('relativeFrom', 'page')
+    posOffset = OxmlElement('wp:posOffset')
+    posOffset.text = str(top_emu)
+    positionV.append(posOffset)
+    anchor.append(positionV)
+    
+    # wp:extent (image dimensions)
+    extent = OxmlElement('wp:extent')
+    extent.set('cx', str(width_emu))
+    extent.set('cy', str(height_emu))
+    anchor.append(extent)
+    
+    # wp:effectExtent
+    effectExtent = OxmlElement('wp:effectExtent')
+    effectExtent.set('l', '0')
+    effectExtent.set('t', '0')
+    effectExtent.set('r', '0')
+    effectExtent.set('b', '0')
+    anchor.append(effectExtent)
+    
+    # wp:wrapNone (no text wrapping)
+    wrapNone = OxmlElement('wp:wrapNone')
+    anchor.append(wrapNone)
+    
+    # wp:docPr (document properties)
+    docPr = OxmlElement('wp:docPr')
+    docPr.set('id', str(image_id))
+    docPr.set('name', f'Picture {image_id}')
+    anchor.append(docPr)
+    
+    # Copy a:graphic from inline to anchor
+    graphic = wp_inline.find(qn('a:graphic'))
+    if graphic is not None:
+        # Deep copy the graphic element
+        graphic_copy = etree.fromstring(etree.tostring(graphic))
+        anchor.append(graphic_copy)
+    
+    # Replace wp:inline with wp:anchor in w:drawing
+    drawing.remove(wp_inline)
+    drawing.append(anchor)
+
+
 def add_positioned_image_region(doc: Document, region_elem, page_height_pt: float, current_y_pt: float, assets_dict: dict) -> float:
     """
-    Add an image region with absolute positioning.
+    Add an image region with absolute positioning using wp:anchor.
     
     Returns the new current_y_pt (bottom of this region).
     """
@@ -668,14 +833,13 @@ def add_positioned_image_region(doc: Document, region_elem, page_height_pt: floa
         run.font.color.rgb = RGBColor(128, 128, 128)
         return top_from_page_top_pt + h_pt
     
-    # Add image with positioning
+    # Add image with wp:anchor for precise positioning
     para = doc.add_paragraph()
     para.paragraph_format.space_before = Pt(space_before_pt)
     para.paragraph_format.space_after = Pt(0)
-    para.paragraph_format.left_indent = Pt(left_pt)
     
-    run = para.add_run()
-    run.add_picture(image_path, width=Pt(w_pt), height=Pt(h_pt))
+    # Use wp:anchor for absolute positioning
+    add_anchored_image(para, image_path, left_pt, top_from_page_top_pt, w_pt, h_pt)
     
     # Add caption if present
     caption_elem = image_content.find(f'{{{DOCIR_NS}}}caption')
@@ -753,6 +917,41 @@ def process_table_region(doc: Document, region_elem):
         
         tblPr.append(borders)
     
+    # Helper: apply per-cell borders from cell_borders element
+    def apply_cell_borders_flow(cell_elem, cell):
+        """Apply per-cell border styling from DocIR cell_borders element."""
+        cell_borders_elem = cell_elem.find(f'{{{DOCIR_NS}}}cell_borders')
+        if cell_borders_elem is None:
+            return
+        
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        
+        tc = cell._tc
+        tcPr = tc.tcPr if tc.tcPr is not None else OxmlElement('w:tcPr')
+        if tc.tcPr is None:
+            tc.insert(0, tcPr)
+        
+        tcBorders = OxmlElement('w:tcBorders')
+        has_borders = False
+        
+        for edge in ['top', 'bottom', 'left', 'right']:
+            border_elem = cell_borders_elem.find(f'{{{DOCIR_NS}}}border_{edge}')
+            if border_elem is not None:
+                has_borders = True
+                border = OxmlElement(f'w:{edge}')
+                style = border_elem.get('style', 'single')
+                border.set(qn('w:val'), style)
+                width_pt = float(border_elem.get('width', '0.5'))
+                border.set(qn('w:sz'), str(int(width_pt * 8)))
+                border.set(qn('w:space'), '0')
+                color = border_elem.get('color', '#000000').lstrip('#')
+                border.set(qn('w:color'), color)
+                tcBorders.append(border)
+        
+        if has_borders:
+            tcPr.append(tcBorders)
+    
     row_idx = 0
     
     header_group = table_content.find(f'{{{DOCIR_NS}}}row_group[@type="header"]')
@@ -795,6 +994,9 @@ def process_table_region(doc: Document, region_elem):
                         for run in para.runs:
                             run.font.bold = True
                 
+                # Apply per-cell borders if present
+                apply_cell_borders_flow(cell_elem, cell)
+                
                 col_idx += col_span
             
             row_idx += 1
@@ -833,6 +1035,9 @@ def process_table_region(doc: Document, region_elem):
                     if len(cell.paragraphs) > 1 and not cell.paragraphs[0].text:
                         p = cell.paragraphs[0]._element
                         p.getparent().remove(p)
+                
+                # Apply per-cell borders if present
+                apply_cell_borders_flow(cell_elem, cell)
                 
                 col_idx += col_span
             

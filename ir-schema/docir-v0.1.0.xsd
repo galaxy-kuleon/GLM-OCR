@@ -270,10 +270,28 @@
         <xs:element name="text_content" type="docir:TextContent"/>
         <xs:element name="table_content" type="docir:TableContent"/>
       </xs:choice>
+      <!-- Per-cell border styling -->
+      <xs:element name="cell_borders" type="docir:CellBorders" minOccurs="0"/>
     </xs:sequence>
     <xs:attribute name="row_span" type="xs:positiveInteger" use="optional" default="1"/>
     <xs:attribute name="col_span" type="xs:positiveInteger" use="optional" default="1"/>
     <xs:attribute name="background_color" type="xs:string" use="optional"/>
+  </xs:complexType>
+
+  <!-- Per-cell border definition -->
+  <xs:complexType name="CellBorders">
+    <xs:sequence>
+      <xs:element name="border_top" type="docir:CellBorder" minOccurs="0"/>
+      <xs:element name="border_bottom" type="docir:CellBorder" minOccurs="0"/>
+      <xs:element name="border_left" type="docir:CellBorder" minOccurs="0"/>
+      <xs:element name="border_right" type="docir:CellBorder" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="CellBorder">
+    <xs:attribute name="style" type="xs:string" use="optional" default="single"/>
+    <xs:attribute name="width" type="xs:decimal" use="optional" default="0.5"/>
+    <xs:attribute name="color" type="xs:string" use="optional" default="#000000"/>
   </xs:complexType>
 
   <!-- ============================================================ -->
