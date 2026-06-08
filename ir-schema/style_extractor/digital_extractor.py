@@ -299,10 +299,18 @@ def extract_region_style_digital(
     font_family = normalize_font_family(font_name)
     
     # Calculate line height from font metrics
-    # PyMuPDF provides ascender/descender in font flags
-    # Typical ratio: line_height ≈ font_size * 1.2
-    # More accurate: use the actual line spacing from the PDF
-    line_height_pt = font_size * 1.2  # Default estimate
+    # Use fontTools to get accurate ascender/descender if available
+    from style_extractor.font_metrics import get_line_height_ratio, normalize_font_name
+    
+    # Get font family name for metrics lookup
+    font_family = font_name.split('-')[0] if font_name else ''
+    if font_family:
+        _, is_bold, is_italic = normalize_font_name(font_name)
+        line_height_ratio = get_line_height_ratio(font_family, font_size)
+    else:
+        line_height_ratio = 1.2  # Default
+    
+    line_height_pt = font_size * line_height_ratio
     
     # Calculate line height from font metrics
     # Use line bboxes for more accurate measurement

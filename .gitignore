@@ -176,3 +176,12 @@ data/
 /apps/frontend/dist/
 *.pid
 .DS_Store
+input/
+output-*/
+image_input/
+*.sh
+*.sh.bak
+translate_*.py
+uv.lock
+tests/test_form*
+tests/test_text_rotation*
