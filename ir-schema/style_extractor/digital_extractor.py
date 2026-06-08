@@ -50,6 +50,7 @@ class DigitalStyle:
     text_scale: Optional[float] = None  # Horizontal scaling (100 = normal)
     shading_color: Optional[str] = None  # Background shading #RRGGBB
     underline_color: Optional[str] = None  # Underline color #RRGGBB
+    alignment: Optional[str] = None  # left, center, right, justify
     
     # Evidence
     evidence_confidence: float = 1.0  # Digital = 100% confidence
@@ -145,6 +146,92 @@ def is_digital_page(page: pymupdf.Page, text_threshold: float = 0.05) -> bool:
                     return True
     
     return False
+
+
+def detect_alignment(text_dict: dict, region_rect: 'pymupdf.Rect', threshold_pt: float = 2.0) -> Optional[str]:
+    """
+    Detect paragraph alignment from line positions.
+    
+    Algorithm (from pdf2docx):
+    - LEFT: all lines have similar x0 (left edge)
+    - RIGHT: all lines have similar x1 (right edge)  
+    - CENTER: all lines have similar center point
+    - JUSTIFY: lines have varying widths but similar x0 AND x1
+    
+    Args:
+        text_dict: PyMuPDF text dictionary with blocks/lines
+        region_rect: Region bounding box
+        threshold_pt: Tolerance for alignment detection (points)
+    
+    Returns:
+        'left', 'center', 'right', 'justify', or None if undetermined
+    """
+    # Collect line x-coordinates (only lines within the region)
+    line_coords = []  # (x0, x1) for each line
+    
+    for block in text_dict.get("blocks", []):
+        if block.get("type") != 0:  # Skip images
+            continue
+        for line in block.get("lines", []):
+            bbox = line.get("bbox")
+            if bbox:
+                x0, y0, x1, y1 = bbox
+                # Check if line is within region (with some tolerance)
+                line_rect = pymupdf.Rect(x0, y0, x1, y1)
+                if not region_rect.intersects(line_rect):
+                    continue
+                # Only include lines with actual text
+                has_text = any(span.get("text", "").strip() for span in line.get("spans", []))
+                if has_text:
+                    line_coords.append((x0, x1))
+    
+    if len(line_coords) < 2:
+        return "left"  # Single line or empty = default left
+    
+    # Analyze alignment
+    x0_values = [c[0] for c in line_coords]
+    x1_values = [c[1] for c in line_coords]
+    centers = [(c[0] + c[1]) / 2 for c in line_coords]
+    
+    x0_range = max(x0_values) - min(x0_values)
+    x1_range = max(x1_values) - min(x1_values)
+    center_range = max(centers) - min(centers)
+    
+    region_width = region_rect.width
+    region_center_x = (region_rect.x0 + region_rect.x1) / 2
+    
+    # Check right alignment: all x1 close to region right edge
+    avg_x1 = sum(x1_values) / len(x1_values)
+    right_margin = region_rect.x1 - avg_x1
+    
+    # Check center alignment: all centers close to region center
+    avg_center = sum(centers) / len(centers)
+    center_offset = abs(avg_center - region_center_x)
+    
+    # Decision logic (order matters: check center/right before left/justify)
+    
+    # Check center alignment: all centers close to region center
+    if center_range < threshold_pt and center_offset < threshold_pt:
+        return "center"
+    
+    # Check right alignment: all x1 close to region right edge
+    if x1_range < threshold_pt and right_margin < threshold_pt * 2:
+        return "right"
+    
+    # Check left alignment: all x0 close together
+    if x0_range < threshold_pt:
+        # Could be left or justify
+        # If lines are wide and fill the region, it's justify
+        avg_width = sum(c[1] - c[0] for c in line_coords) / len(line_coords)
+        if avg_width > region_width * 0.85 and x1_range < threshold_pt:
+            return "justify"
+        return "left"
+    
+    # Check justify: lines have varying x0 but similar x1 (right-justified)
+    if x1_range < threshold_pt:
+        return "justify"
+    
+    return "left"  # Default
 
 
 def extract_region_style_digital(
@@ -247,6 +334,9 @@ def extract_region_style_digital(
     # TODO: Extract from PDF text markup annotations
     underline_color = None
     
+    # Detect paragraph alignment from line positions
+    alignment = detect_alignment(text_dict, region_rect)
+    
     return DigitalStyle(
         font_name=font_name,
         font_family=font_family,
@@ -260,6 +350,7 @@ def extract_region_style_digital(
         text_scale=round(text_scale, 1),
         shading_color=shading_color,
         underline_color=underline_color,
+        alignment=alignment,
         evidence_confidence=1.0,
         extraction_time_ms=0,
         source="digital_pdf"
@@ -460,6 +551,11 @@ def _update_region_style(region_elem: etree.Element, style: DigitalStyle, ns: st
     if style.underline_color:
         ul_color_elem = etree.SubElement(style_elem, f"{{{ns}}}underline_color")
         ul_color_elem.set("value", style.underline_color)
+    
+    # Add alignment
+    if style.alignment:
+        align_elem = etree.SubElement(style_elem, f"{{{ns}}}alignment")
+        align_elem.set("value", style.alignment)
     
     # Add evidence
     evidence_elem = etree.SubElement(style_elem, f"{{{ns}}}evidence")

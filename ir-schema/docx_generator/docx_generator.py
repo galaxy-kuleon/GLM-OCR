@@ -319,8 +319,14 @@ def add_positioned_text_region(doc: Document, region_elem, page_height_pt: float
         # Set horizontal position via left_indent
         pf.left_indent = Pt(left_pt)
         
-        # Paragraph alignment
+        # Paragraph alignment (para attr > region computed_style > default)
         alignment = para_elem.get('alignment')
+        if not alignment and region_elem is not None:
+            computed_style = region_elem.find(f'{{{DOCIR_NS}}}computed_style')
+            if computed_style is not None:
+                align_elem = computed_style.find(f'{{{DOCIR_NS}}}alignment')
+                if align_elem is not None:
+                    alignment = align_elem.get('value')
         if alignment:
             set_paragraph_alignment(para, alignment)
         
@@ -864,7 +870,14 @@ def process_text_region(doc: Document, region_elem):
     for para_elem in text_content.findall(f'{{{DOCIR_NS}}}paragraph'):
         para = doc.add_paragraph()
         
+        # Paragraph alignment (para attr > region computed_style > default)
         alignment = para_elem.get('alignment')
+        if not alignment and region_elem is not None:
+            computed_style = region_elem.find(f'{{{DOCIR_NS}}}computed_style')
+            if computed_style is not None:
+                align_elem = computed_style.find(f'{{{DOCIR_NS}}}alignment')
+                if align_elem is not None:
+                    alignment = align_elem.get('value')
         if alignment:
             set_paragraph_alignment(para, alignment)
         
