@@ -101,6 +101,11 @@ def main():
         default=1,
         help='Number of parallel VLM requests for style extraction (default: 1)'
     )
+    parser.add_argument(
+        '--detect-headers',
+        action='store_true',
+        help='Detect headers and footers from multi-page documents'
+    )
     
     args = parser.parse_args()
     
@@ -225,6 +230,18 @@ def main():
     else:
         print("\n⊘ Skipping style extraction")
         final_docir = docir_xml
+    
+    # Step 3.5: Header/Footer Detection (multi-page only)
+    if args.detect_headers:
+        header_footer_cmd = [
+            sys.executable,
+            str(script_dir / 'builder' / 'header_footer_detector.py'),
+            str(final_docir),
+            '-o', str(final_docir),  # Overwrite in place
+        ]
+        run_command(header_footer_cmd, "Step 3.5: Header/Footer Detection")
+    else:
+        print("\n⊘ Skipping header/footer detection (use --detect-headers to enable)")
     
     # Step 4: DOCX Generator
     docx_generator_cmd = [
