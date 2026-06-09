@@ -209,7 +209,99 @@ def build_text_box_region(
     return region
 
 
-def build_table_region(table: Any, page_idx: int, region_idx: int, page_h: float) -> etree._Element:
+def best_span_for_cell(page: Any, cell_bbox: tuple[float, float, float, float], cell_text: str) -> dict[str, Any] | None:
+    """Find the most relevant PyMuPDF text span for a table cell.
+
+    PyMuPDF's table.extract() gives clean cell text but drops font/color/style.
+    We recover a best-effort style hint from spans that geometrically overlap
+    the source cell, preserving obvious human-visible styling like red italic
+    table text.
+    """
+    if page is None or not cell_text:
+        return None
+    try:
+        text_dict = page.get_text("dict")
+    except Exception:
+        return None
+    best: tuple[float, dict[str, Any]] | None = None
+    for block in text_dict.get("blocks", []) if isinstance(text_dict, dict) else []:
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []) or []:
+            for span in visible_spans(line):
+                span_text = (span.get("text") or "").strip()
+                if not span_text:
+                    continue
+                span_bbox = span.get("bbox")
+                if not span_bbox or len(span_bbox) != 4:
+                    continue
+                span_rect = (float(span_bbox[0]), float(span_bbox[1]), float(span_bbox[2]), float(span_bbox[3]))
+                overlap = rect_overlap_ratio(span_rect, cell_bbox)
+                # Header cells can be represented as one long span crossing
+                # multiple cells; allow textual overlap as a weak signal.
+                if overlap <= 0 and span_text not in cell_text and cell_text not in span_text:
+                    continue
+                score = overlap
+                if span_text in cell_text or cell_text in span_text:
+                    score += 0.25
+                if best is None or score > best[0]:
+                    best = (score, span)
+    return best[1] if best is not None else None
+
+
+def apply_span_style(run: etree._Element, span: dict[str, Any] | None) -> None:
+    if not span:
+        return
+    font = span.get("font") or ""
+    size = span.get("size")
+    flags = int(span.get("flags") or 0)
+    color = color_to_hex(span.get("color"))
+    if font:
+        run.set("font_name", normalize_font_name(font))
+    if size:
+        run.set("font_size_pt", f"{float(size):.2f}")
+    if is_bold(font, flags):
+        run.set("bold", "true")
+    if is_italic(font, flags):
+        run.set("italic", "true")
+    if color:
+        run.set("color", color)
+
+
+def add_cell_text(cell_el: etree._Element, cell_text: str, style_span: dict[str, Any] | None = None) -> None:
+    tc = etree.SubElement(cell_el, tag("text_content"))
+    para = etree.SubElement(tc, tag("paragraph"))
+    run = etree.SubElement(para, tag("run"))
+    # Keep embedded newlines inside one paragraph. python-docx converts them
+    # into line breaks, avoiding the extra paragraph spacing that otherwise
+    # clips multi-line table cells when row heights match the source PDF.
+    run.text = str(cell_text or "")
+    apply_span_style(run, style_span)
+
+
+def table_row_heights(table: Any, rows: int) -> list[float]:
+    cells = [c for c in (getattr(table, "cells", None) or []) if c]
+    if not cells or rows <= 0:
+        x0, y0, x1, y1 = tuple(table.bbox)
+        return [(y1 - y0) / max(1, rows)] * max(0, rows)
+    y_edges = sorted({round(float(c[1]), 2) for c in cells} | {round(float(c[3]), 2) for c in cells})
+    heights = [max(1.0, y_edges[i + 1] - y_edges[i]) for i in range(len(y_edges) - 1)]
+    if len(heights) != rows:
+        x0, y0, x1, y1 = tuple(table.bbox)
+        return [(y1 - y0) / max(1, rows)] * rows
+    return heights
+
+
+def cell_bbox_at(table: Any, row_idx: int, col_idx: int, rows: int, cols: int) -> tuple[float, float, float, float] | None:
+    cells = getattr(table, "cells", None) or []
+    # PyMuPDF currently exposes cells column-major for this table API.
+    idx = col_idx * rows + row_idx
+    if 0 <= idx < len(cells) and cells[idx]:
+        return tuple(cells[idx])
+    return None
+
+
+def build_table_region(table: Any, page_idx: int, region_idx: int, page_h: float, page: Any | None = None) -> etree._Element:
     """Build a DocIR table region from PyMuPDF Table."""
     region = etree.Element(tag("region"))
     region.set("id", f"r{region_idx}_p{page_idx}")
@@ -222,6 +314,7 @@ def build_table_region(table: Any, page_idx: int, region_idx: int, page_h: float
     data = table.extract() or []
     rows = len(data)
     cols = max((len(r) for r in data), default=0)
+    row_heights = table_row_heights(table, rows)
     table_content = etree.SubElement(region, tag("table_content"))
     table_content.set("rows", str(rows))
     table_content.set("cols", str(cols))
@@ -231,27 +324,30 @@ def build_table_region(table: Any, page_idx: int, region_idx: int, page_h: float
     if rows > 1:
         table_style.set("header_row", "true")
 
+    def add_row(parent: etree._Element, row_data: list[str], row_idx: int) -> None:
+        row_el = etree.SubElement(parent, tag("row"))
+        if row_idx < len(row_heights):
+            row_el.set("height_pt", f"{row_heights[row_idx]:.2f}")
+        for col_idx in range(cols):
+            cell_text = (row_data[col_idx] if col_idx < len(row_data) else "") or ""
+            cell_el = etree.SubElement(row_el, tag("cell"))
+            cell_bbox = cell_bbox_at(table, row_idx, col_idx, rows, cols)
+            if cell_bbox is not None:
+                x0, y0, x1, y1 = cell_bbox
+                cell_el.set("width_pt", f"{max(1.0, x1 - x0):.2f}")
+                cell_el.set("height_pt", f"{max(1.0, y1 - y0):.2f}")
+            style_span = best_span_for_cell(page, cell_bbox, cell_text) if cell_bbox is not None else None
+            add_cell_text(cell_el, cell_text, style_span)
+
     if rows:
         header = etree.SubElement(table_content, tag("row_group"))
         header.set("type", "header")
-        row_el = etree.SubElement(header, tag("row"))
-        for cell_text in data[0]:
-            cell_el = etree.SubElement(row_el, tag("cell"))
-            tc = etree.SubElement(cell_el, tag("text_content"))
-            para = etree.SubElement(tc, tag("paragraph"))
-            run = etree.SubElement(para, tag("run"))
-            run.text = cell_text or ""
+        add_row(header, data[0], 0)
     if rows > 1:
         body = etree.SubElement(table_content, tag("row_group"))
         body.set("type", "body")
-        for row in data[1:]:
-            row_el = etree.SubElement(body, tag("row"))
-            for i in range(cols):
-                cell_el = etree.SubElement(row_el, tag("cell"))
-                tc = etree.SubElement(cell_el, tag("text_content"))
-                para = etree.SubElement(tc, tag("paragraph"))
-                run = etree.SubElement(para, tag("run"))
-                run.text = (row[i] if i < len(row) else "") or ""
+        for row_idx, row in enumerate(data[1:], start=1):
+            add_row(body, row, row_idx)
 
     return region
 
@@ -339,7 +435,7 @@ def build_docir(pdf_path: Path, output_path: Path, title: str | None = None) -> 
             try:
                 bbox = tuple(table.bbox)
                 table_bboxes.append(bbox)
-                region = build_table_region(table, page_idx, len(region_items), page.rect.height)
+                region = build_table_region(table, page_idx, len(region_items), page.rect.height, page=page)
                 region_items.append((bbox, region))
             except Exception:
                 continue

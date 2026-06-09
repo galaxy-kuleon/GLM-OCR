@@ -429,22 +429,18 @@ def add_floating_text_box(doc: Document, region_elem, page_height_pt: float, cur
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
     
-    # Add borders
+    # Add borders (source PDF text boxes are drawn rectangles; keep them visible)
     tcBorders = OxmlElement('w:tcBorders')
     for border_name in ['top', 'left', 'bottom', 'right']:
         border = OxmlElement(f'w:{border_name}')
         border.set(qn('w:val'), 'single')
-        border.set(qn('w:sz'), '4')  # 0.5pt
+        border.set(qn('w:sz'), '24')  # 3pt (OOXML eighths of a point)
         border.set(qn('w:space'), '0')
-        border.set(qn('w:color'), '666666')
+        border.set(qn('w:color'), '000000')
         tcBorders.append(border)
     tcPr.append(tcBorders)
     
-    # Add light gray shading
-    shading = OxmlElement('w:shd')
-    shading.set(qn('w:fill'), 'F5F5F5')
-    shading.set(qn('w:val'), 'clear')
-    tcPr.append(shading)
+    # Do not add artificial gray shading; preserve the source-like white fill.
     
     # Set cell width
     tcW = OxmlElement('w:tcW')
@@ -534,10 +530,24 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
     # causing text wrapping, table height inflation, and downstream image overlap.
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
+    from docx.enum.table import WD_ROW_HEIGHT_RULE
     col_width_pt = w_pt / max(1, num_cols)
+    row_height_pts: list[float] = []
+    for group_name in ("header", "body"):
+        group = table_content.find(f'{{{DOCIR_NS}}}row_group[@type="{group_name}"]')
+        if group is None:
+            continue
+        for row_elem in group.findall(f'{{{DOCIR_NS}}}row'):
+            try:
+                row_height_pts.append(float(row_elem.get('height_pt', '0')))
+            except ValueError:
+                row_height_pts.append(0.0)
     for col in table.columns:
         col.width = Pt(col_width_pt)
-    for row in table.rows:
+    for row_idx, row in enumerate(table.rows):
+        if row_idx < len(row_height_pts) and row_height_pts[row_idx] > 0:
+            row.height = Pt(row_height_pts[row_idx])
+            row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
         for cell in row.cells:
             cell.width = Pt(col_width_pt)
             tcPr = cell._tc.get_or_add_tcPr()
@@ -545,6 +555,15 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
             tcW.set(qn('w:w'), str(int(col_width_pt * 20)))
             tcW.set(qn('w:type'), 'dxa')
             tcPr.append(tcW)
+            # Match tight PDF table cells and prevent Word's default margins
+            # from forcing header wraps / row inflation.
+            tcMar = OxmlElement('w:tcMar')
+            for margin_name in ['top', 'left', 'bottom', 'right']:
+                mar = OxmlElement(f'w:{margin_name}')
+                mar.set(qn('w:w'), '0')
+                mar.set(qn('w:type'), 'dxa')
+                tcMar.append(mar)
+            tcPr.append(tcMar)
     
     tbl = table._tbl
     tblPr = tbl.tblPr if tbl.tblPr is not None else OxmlElement('w:tblPr')
@@ -664,6 +683,9 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                     cell.text = ''
                     for para_elem in text_content_elem.findall(f'{{{DOCIR_NS}}}paragraph'):
                         para = cell.add_paragraph()
+                        para.paragraph_format.space_before = Pt(0)
+                        para.paragraph_format.space_after = Pt(0)
+                        para.paragraph_format.line_spacing = 1.0
                         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
                             text = run_elem.text or ''
                             run = para.add_run(text)
@@ -673,10 +695,9 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         p = cell.paragraphs[0]._element
                         p.getparent().remove(p)
                 
-                if has_header and row_idx == 0:
-                    for para in cell.paragraphs:
-                        for run in para.runs:
-                            run.font.bold = True
+                # Preserve source-extracted run style only; do not auto-bold
+                # header rows. Auto-bold widened header text and caused Word
+                # wrapping / table-height inflation in rendered output.
                 
                 # Apply per-cell borders if present
                 apply_cell_borders(cell_elem, cell)
@@ -712,6 +733,9 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                     cell.text = ''
                     for para_elem in text_content_elem.findall(f'{{{DOCIR_NS}}}paragraph'):
                         para = cell.add_paragraph()
+                        para.paragraph_format.space_before = Pt(0)
+                        para.paragraph_format.space_after = Pt(0)
+                        para.paragraph_format.line_spacing = 1.0
                         for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
                             text = run_elem.text or ''
                             run = para.add_run(text)
@@ -900,13 +924,23 @@ def add_positioned_image_region(doc: Document, region_elem, page_height_pt: floa
         run.font.color.rgb = RGBColor(128, 128, 128)
         return top_from_page_top_pt + h_pt
     
-    # Add image with wp:anchor for precise positioning
+    # Add image with wp:anchor for precise positioning. Because anchored
+    # drawings are floating, Word does not reserve their height in normal flow;
+    # add a real spacer paragraph after the anchor so later flow-rendered
+    # elements (e.g. text boxes) do not climb into the image.
     para = doc.add_paragraph()
     para.paragraph_format.space_before = Pt(space_before_pt)
     para.paragraph_format.space_after = Pt(0)
     
     # Use wp:anchor for absolute positioning
     add_anchored_image(para, image_path, left_pt, top_from_page_top_pt, w_pt, h_pt)
+
+    reserve_para = doc.add_paragraph()
+    reserve_para.paragraph_format.space_before = Pt(0)
+    reserve_para.paragraph_format.space_after = Pt(0)
+    reserve_para.paragraph_format.line_spacing = Pt(h_pt)
+    reserve_run = reserve_para.add_run("\u200b")
+    reserve_run.font.size = Pt(1)
     
     # Add caption if present
     caption_elem = image_content.find(f'{{{DOCIR_NS}}}caption')
@@ -1082,10 +1116,9 @@ def process_table_region(doc: Document, region_elem):
                         p = cell.paragraphs[0]._element
                         p.getparent().remove(p)
                 
-                if has_header and row_idx == 0:
-                    for para in cell.paragraphs:
-                        for run in para.runs:
-                            run.font.bold = True
+                # Preserve source-extracted run style only; do not auto-bold
+                # header rows. Auto-bold widened header text and caused Word
+                # wrapping / table-height inflation in rendered output.
                 
                 # Apply per-cell borders if present
                 apply_cell_borders_flow(cell_elem, cell)
