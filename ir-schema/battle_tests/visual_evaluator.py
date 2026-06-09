@@ -65,29 +65,44 @@ def judge_pair(
     max_tokens: int = 4096,
     timeout: int = 180,
 ) -> dict[str, Any]:
-    prompt = """You are a brutally honest document-conversion visual fidelity judge.
-Compare SOURCE PDF page render vs OUTPUT DOCX page render.
+    prompt = """You are a brutally honest human reviewer evaluating PDF→DOCX conversion quality.
+Compare SOURCE PDF page render vs OUTPUT DOCX page render from an end-user / lawyer / office-worker point of view.
+
+Judge what a real human would notice when opening the generated DOCX:
+- Does it look like the original page at first glance?
+- Would the user trust it as a converted editable document?
+- Are text, tables, images, text boxes, headers/footers, spacing, colors, and typography visually faithful?
+- Are defects merely cosmetic, or would they require manual rework?
+- Does the rendered DOCX suggest the underlying DOCX is editable without screenshot cheating?
 
 Return ONLY valid JSON with this schema:
 {
   "score": 0-10,
   "verdict": "pass|borderline|fail",
+  "human_acceptability": "acceptable|needs_minor_touchup|needs_major_rework|unusable",
+  "first_impression": "one sentence human reaction",
   "text_accuracy": 0-10,
   "layout_accuracy": 0-10,
   "typography_accuracy": 0-10,
   "table_accuracy": 0-10,
   "image_accuracy": 0-10,
+  "editability_confidence": 0-10,
+  "human_visible_defects": [
+    {"severity": "critical|major|minor", "area": "text|layout|typography|table|image|textbox|header_footer|editability", "description": "specific visible defect", "human_impact": "why a user would care"}
+  ],
   "major_defects": ["..."],
   "minor_defects": ["..."],
-  "actionable_fixes": ["..."]
+  "actionable_fixes": ["prioritized engineering fixes"],
+  "would_accept_for_client_delivery": true|false,
+  "client_delivery_reason": "short reason"
 }
 
 Scoring guidance:
-- 9-10: nearly indistinguishable and editable
-- 7-8: usable with minor layout/style defects
-- 5-6: recognizable but commercial-quality failure
-- 0-4: severe missing content/layout collapse
-Be strict: missing tables/images, text overlap, wrong page geometry, or missing CJK text are major defects.
+- 9-10: nearly indistinguishable, editable, client-deliverable
+- 7-8: usable with minor human touch-up
+- 5-6: recognizable but not commercial/client quality
+- 0-4: severe missing content/layout collapse/unusable
+Be strict: missing tables/images, text overlap, wrong page geometry, missing CJK text, displaced text boxes, or screenshot-cheating are critical/major defects.
 """
     payload = {
         "model": model,
@@ -138,6 +153,59 @@ def prepare_pair(source_pdf: Path, output_docx: Path, out_dir: Path, max_pages: 
     return source_pages, output_pages, output_pdf
 
 
+def write_human_review_report(out_dir: Path, source_pdf: Path, output_docx: Path, results: list[dict[str, Any]]) -> Path:
+    """Write a human-POV markdown report from visual judge JSON outputs."""
+    lines: list[str] = []
+    lines.append("# Human-POV DOCX Fidelity Review")
+    lines.append("")
+    lines.append(f"Source PDF: `{source_pdf}`")
+    lines.append(f"Output DOCX: `{output_docx}`")
+    lines.append("")
+    for res in results:
+        model = res.get("model", "?")
+        j = res.get("json") or {}
+        lines.append(f"## Judge: `{model}`")
+        lines.append("")
+        if not j:
+            lines.append(f"- Error: `{res.get('error')}`")
+            lines.append("")
+            continue
+        lines.append(f"- Score: **{j.get('score', '?')}/10**")
+        lines.append(f"- Verdict: **{j.get('verdict', '?')}**")
+        lines.append(f"- Human acceptability: **{j.get('human_acceptability', '?')}**")
+        lines.append(f"- Client-deliverable: **{j.get('would_accept_for_client_delivery', '?')}**")
+        if j.get("first_impression"):
+            lines.append(f"- First impression: {j['first_impression']}")
+        if j.get("client_delivery_reason"):
+            lines.append(f"- Client delivery reason: {j['client_delivery_reason']}")
+        lines.append("")
+        lines.append("### Category scores")
+        for key in ["text_accuracy", "layout_accuracy", "typography_accuracy", "table_accuracy", "image_accuracy", "editability_confidence"]:
+            if key in j:
+                lines.append(f"- {key}: {j[key]}/10")
+        lines.append("")
+        visible = j.get("human_visible_defects") or []
+        if visible:
+            lines.append("### Human-visible defects")
+            for d in visible:
+                if isinstance(d, dict):
+                    lines.append(f"- **{d.get('severity', '?')} / {d.get('area', '?')}**: {d.get('description', '')}")
+                    if d.get("human_impact"):
+                        lines.append(f"  - Human impact: {d['human_impact']}")
+                else:
+                    lines.append(f"- {d}")
+            lines.append("")
+        fixes = j.get("actionable_fixes") or []
+        if fixes:
+            lines.append("### Actionable fixes")
+            for fix in fixes:
+                lines.append(f"- {fix}")
+            lines.append("")
+    report = out_dir / "human_review.md"
+    report.write_text("\n".join(lines), encoding="utf-8")
+    return report
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--source-pdf", type=Path, required=True)
@@ -163,7 +231,9 @@ def main() -> int:
     out = {"source_pages": [str(p) for p in source_pages], "output_pages": [str(p) for p in output_pages], "output_pdf": str(output_pdf), "results": results}
     args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "visual_eval.json").write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    report = write_human_review_report(args.out_dir, args.source_pdf, args.output_docx, results)
     print(f"Saved: {args.out_dir / 'visual_eval.json'}")
+    print(f"Human review: {report}")
     return 0
 
 
