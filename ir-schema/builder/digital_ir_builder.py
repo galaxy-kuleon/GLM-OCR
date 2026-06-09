@@ -53,6 +53,29 @@ def normalize_font_name(font_name: str) -> str:
     return name.replace("-", " ").strip() or font_name
 
 
+def span_is_visible(span: dict[str, Any]) -> bool:
+    """Return False for invisible/transparent PDF text spans.
+
+    Born-digital PDFs often contain hidden OCR/decoy layers. PyMuPDF exposes
+    fully transparent text with alpha=0; rendering that into DOCX creates
+    human-visible garbage even though it was invisible in the source PDF.
+    """
+    alpha = span.get("alpha")
+    if alpha is not None:
+        try:
+            # PyMuPDF alpha is 0..255. Treat fully transparent and near-zero
+            # antialiasing artifacts as invisible.
+            if float(alpha) <= 1:
+                return False
+        except (TypeError, ValueError):
+            pass
+    return True
+
+
+def visible_spans(line: dict[str, Any]) -> list[dict[str, Any]]:
+    return [span for span in (line.get("spans") or []) if span_is_visible(span)]
+
+
 def add_provenance(region: etree._Element, source: str = "pymupdf-digital-direct") -> None:
     prov = etree.SubElement(region, tag("provenance"))
     etree.SubElement(prov, tag("source")).text = source
@@ -79,7 +102,7 @@ def build_text_region(block: dict[str, Any], page_idx: int, region_idx: int, pag
     text = "".join(
         span.get("text", "")
         for line in lines
-        for span in (line.get("spans") or [])
+        for span in visible_spans(line)
     ).strip()
     if not text:
         return None
@@ -98,12 +121,11 @@ def build_text_region(block: dict[str, Any], page_idx: int, region_idx: int, pag
 
     text_content = etree.SubElement(region, tag("text_content"))
     for line in lines:
-        para = etree.SubElement(text_content, tag("paragraph"))
         # Preserve line-level runs/spans for formatting.
-        spans = line.get("spans") or []
+        spans = visible_spans(line)
         if not spans:
-            etree.SubElement(para, tag("run")).text = ""
             continue
+        para = etree.SubElement(text_content, tag("paragraph"))
         for span in spans:
             span_text = span.get("text", "")
             if not span_text:
@@ -158,8 +180,11 @@ def build_text_box_region(
     text_content = etree.SubElement(region, tag("text_content"))
     for block in inner_blocks:
         for line in block.get("lines", []) or []:
+            spans = visible_spans(line)
+            if not spans:
+                continue
             para = etree.SubElement(text_content, tag("paragraph"))
-            for span in line.get("spans", []) or []:
+            for span in spans:
                 span_text = span.get("text", "")
                 if not span_text:
                     continue
