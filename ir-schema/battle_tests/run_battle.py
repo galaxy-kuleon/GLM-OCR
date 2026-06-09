@@ -84,6 +84,28 @@ def docir_metrics(work_dir: Path, stem: str) -> dict[str, Any]:
         return {"docir": str(path), "error": str(e)}
 
 
+def prefer_digital_direct(case: dict[str, Any]) -> bool:
+    """Return True when a case should use PyMuPDF digital-direct before OCR.
+
+    Human-POV lesson from battle testing: low-text native PDFs (forms, tables,
+    hidden OCR layers, mixed native+raster) can be misclassified as
+    "mixed/low-text" and then spend 4+ minutes timing out in Ollama OCR. If the
+    PDF exposes any native text or image structure, digital-direct gives an
+    immediate editable-or-at-least-visible DOCX candidate; visual evaluation can
+    then decide whether hidden text / screenshot-like output is unacceptable.
+    """
+    if case.get("kind") == "digital":
+        return True
+    if int(case.get("avg_text") or 0) > 0:
+        return True
+    if int(case.get("images") or 0) > 0 and case.get("kind") != "scanned/image":
+        return True
+    tags = set(case.get("tags") or [])
+    if "table" in tags or "adversarial" in tags:
+        return int(case.get("avg_text") or 0) > 0
+    return False
+
+
 def run_case(case: dict[str, Any], run_dir: Path, timeout: int, deep_style: bool) -> dict[str, Any]:
     pdf = Path(case["path"])
     rel = case["rel"]
@@ -105,8 +127,11 @@ def run_case(case: dict[str, Any], run_dir: Path, timeout: int, deep_style: bool
         "--detect-headers",
     ]
 
-    # Digital fast path gets exact styles. Non-digital survival run skips style/VLM by default.
-    if case.get("kind") == "digital":
+    # Digital-direct first for any PDF with native extractable structure. This is not
+    # a quality pass; it is a fast candidate generation strategy. Human-POV visual
+    # review remains the gate for whether the output is actually useful.
+    use_digital = prefer_digital_direct(case)
+    if use_digital:
         cmd.append("--digital")
     elif not deep_style:
         cmd.append("--skip-style")
@@ -118,6 +143,7 @@ def run_case(case: dict[str, Any], run_dir: Path, timeout: int, deep_style: bool
         "rel": rel,
         "path": str(pdf),
         "kind": case.get("kind"),
+        "strategy": "digital-direct" if use_digital else ("ocr-vlm-style" if deep_style else "ocr-skip-style"),
         "tags": case.get("tags", []),
         "pages_expected": case.get("pages"),
         "size_mb": case.get("size_mb"),
@@ -164,15 +190,15 @@ def write_summary(results: list[dict[str, Any]], run_dir: Path) -> None:
         f"Run dir: `{run_dir}`",
         f"Generated: {datetime.now().isoformat(timespec='seconds')}",
         "",
-        "| # | Status | Time | Kind | Pages | Regions | Tables | DOCX | Case |",
-        "|---:|---|---:|---|---:|---:|---:|---|---|",
+        "| # | Status | Time | Kind | Strategy | Pages | Regions | Tables | DOCX | Case |",
+        "|---:|---|---:|---|---|---:|---:|---:|---|---|",
     ]
     for i, r in enumerate(results, 1):
         dm = r.get("docir_metrics") or {}
         dx = r.get("docx_metrics") or {}
         docx_cell = "yes" if Path(r.get("output_docx", "")).exists() else "no"
         lines.append(
-            f"| {i} | {r.get('status')} | {r.get('duration_s')}s | {r.get('kind')} | "
+            f"| {i} | {r.get('status')} | {r.get('duration_s')}s | {r.get('kind')} | {r.get('strategy','')} | "
             f"{r.get('pages_expected')} | {dm.get('regions','')} | {dm.get('tables','')} | "
             f"{docx_cell} ({dx.get('paragraphs','')}p/{dx.get('tables','')}t) | `{r.get('rel')}` |"
         )
