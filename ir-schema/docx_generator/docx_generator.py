@@ -916,7 +916,13 @@ def add_positioned_image_region(doc: Document, region_elem, page_height_pt: floa
         return current_y_pt
     
     x_pt, y_pt, w_pt, h_pt = bbox
-    top_from_page_top_pt = page_height_pt - y_pt
+    if region_elem.get('native_label') == 'raster_page_image':
+        # Raster fallback uses validator-friendly bbox y=0 for a full-page
+        # image region. Anchor it at the physical page top rather than applying
+        # the normal DocIR y-from-bottom conversion.
+        top_from_page_top_pt = 0
+    else:
+        top_from_page_top_pt = page_height_pt - y_pt
     left_pt = x_pt
     
     # Calculate space needed before this region

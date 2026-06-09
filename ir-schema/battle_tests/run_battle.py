@@ -131,8 +131,11 @@ def run_case(case: dict[str, Any], run_dir: Path, timeout: int, deep_style: bool
     # a quality pass; it is a fast candidate generation strategy. Human-POV visual
     # review remains the gate for whether the output is actually useful.
     use_digital = prefer_digital_direct(case)
+    use_raster = (not use_digital) and case.get("kind") == "scanned/image"
     if use_digital:
         cmd.append("--digital")
+    elif use_raster:
+        cmd.append("--raster-fallback")
     elif not deep_style:
         cmd.append("--skip-style")
     else:
@@ -143,7 +146,7 @@ def run_case(case: dict[str, Any], run_dir: Path, timeout: int, deep_style: bool
         "rel": rel,
         "path": str(pdf),
         "kind": case.get("kind"),
-        "strategy": "digital-direct" if use_digital else ("ocr-vlm-style" if deep_style else "ocr-skip-style"),
+        "strategy": "digital-direct" if use_digital else ("raster-fallback" if use_raster else ("ocr-vlm-style" if deep_style else "ocr-skip-style")),
         "tags": case.get("tags", []),
         "pages_expected": case.get("pages"),
         "size_mb": case.get("size_mb"),

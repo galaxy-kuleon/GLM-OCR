@@ -96,6 +96,13 @@ def main():
              'Automatically detects digital vs scanned pages.'
     )
     parser.add_argument(
+        '--raster-fallback',
+        action='store_true',
+        help='Use PNG-first raster fallback for scanned/non-digital input. '
+             'Renders PDF pages (or consumes PNG/JPEG pages) as full-page image-backed DocIR; '
+             'bypasses GLM-OCR/Ollama to avoid OCR timeouts.'
+    )
+    parser.add_argument(
         '--parallel',
         type=int,
         default=1,
@@ -113,6 +120,10 @@ def main():
         print(f"Error: Input PDF not found: {args.input_pdf}", file=sys.stderr)
         sys.exit(1)
     
+    if args.digital and args.raster_fallback:
+        print("Error: --digital and --raster-fallback are mutually exclusive", file=sys.stderr)
+        sys.exit(1)
+
     # Get script directory
     script_dir = Path(__file__).parent
     
@@ -139,6 +150,19 @@ def main():
             '--title', args.input_pdf.stem
         ]
         run_command(digital_builder_cmd, "Step 1: Digital IR Builder (PyMuPDF, no OCR)")
+    elif args.raster_fallback:
+        # PNG-first non-digital survival path: preserve the rendered page as a
+        # full-page image region and bypass GLM-OCR/Ollama, which can timeout on
+        # scanned/image-only PDFs.
+        raster_builder_cmd = [
+            sys.executable,
+            str(script_dir / 'builder' / 'raster_ir_builder.py'),
+            str(args.input_pdf),
+            '-o', str(docir_xml),
+            '--title', args.input_pdf.stem,
+            '--dpi', str(args.dpi),
+        ]
+        run_command(raster_builder_cmd, "Step 1: Raster IR Builder (PNG-first fallback, no OCR)")
     else:
         # Step 1: GLM-OCR
         if not args.skip_ocr:
@@ -207,9 +231,13 @@ def main():
     
     # Step 3: Style Extraction
     docir_styled = work_dir / f'{args.input_pdf.stem}-styled.docir.xml'
+    final_docir = docir_xml
     
     if not args.skip_style:
-        if args.digital:
+        if args.raster_fallback:
+            print("\n⊘ Skipping style extraction (raster fallback has no editable text regions yet)")
+            final_docir = docir_xml
+        elif args.digital:
             # Digital PDF fast path: exact fonts from PDF, no VLM
             style_extractor_cmd = [
                 sys.executable,
@@ -239,7 +267,8 @@ def main():
             
             run_command(style_extractor_cmd, "Step 3: Style Extraction (VLM)")
         
-        final_docir = docir_styled
+        if not args.raster_fallback:
+            final_docir = docir_styled
     else:
         print("\n⊘ Skipping style extraction")
         final_docir = docir_xml
@@ -280,10 +309,12 @@ def main():
     print(f"\nIntermediate files:")
     if args.digital:
         print("  Model JSON:   <skipped: digital direct path>")
+    elif args.raster_fallback:
+        print("  Model JSON:   <skipped: raster fallback path>")
     else:
         print(f"  Model JSON:   {model_json}")
     print(f"  DocIR XML:    {docir_xml}")
-    if not args.skip_style:
+    if not args.skip_style and not args.raster_fallback:
         print(f"  Styled XML:   {docir_styled}")
     print(f"{'='*60}")
 
