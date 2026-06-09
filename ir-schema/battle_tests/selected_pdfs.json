@@ -1,0 +1,287 @@
+[
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_31_small_basic_elements.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_31_small_basic_elements.pdf",
+    "size_mb": 0.14,
+    "pages": 1,
+    "avg_text": 377,
+    "images": 1,
+    "kind": "digital",
+    "tags": [
+      "docling-battle"
+    ],
+    "score": 6.51
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_12_complex_table_grid.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_12_complex_table_grid.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 64,
+    "images": 0,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "table"
+    ],
+    "score": 7.7
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_16_heuristic_table_lines.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_16_heuristic_table_lines.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 58,
+    "images": 0,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "table"
+    ],
+    "score": 7.7
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_07_native_table_form_fields.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_07_native_table_form_fields.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 78,
+    "images": 0,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "table"
+    ],
+    "score": 7.7
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_09_mixed_native_raster_image.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_09_mixed_native_raster_image.pdf",
+    "size_mb": 0.0,
+    "pages": 2,
+    "avg_text": 37,
+    "images": 2,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "scanned/ocr",
+      "image/graphics"
+    ],
+    "score": 9.2
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_29_mixed_hidden_native_raster.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_29_mixed_hidden_native_raster.pdf",
+    "size_mb": 0.0,
+    "pages": 2,
+    "avg_text": 63,
+    "images": 2,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "scanned/ocr",
+      "adversarial"
+    ],
+    "score": 9.2
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/level_4_adversarial_decoy_ocr_layer.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/level_4_adversarial_decoy_ocr_layer.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 24,
+    "images": 1,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "scanned/ocr",
+      "adversarial"
+    ],
+    "score": 8.9
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_10_hidden_decoy_text.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_10_hidden_decoy_text.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 52,
+    "images": 0,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "adversarial"
+    ],
+    "score": 7.7
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_25_cjk_rtl_mixed.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_25_cjk_rtl_mixed.pdf",
+    "size_mb": 0.01,
+    "pages": 2,
+    "avg_text": 0,
+    "images": 2,
+    "kind": "scanned/image",
+    "tags": [
+      "docling-battle",
+      "cjk",
+      "rtl"
+    ],
+    "score": 9.2
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_14_cjk_raster_ocr.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_14_cjk_raster_ocr.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 0,
+    "images": 1,
+    "kind": "scanned/image",
+    "tags": [
+      "docling-battle",
+      "scanned/ocr",
+      "cjk"
+    ],
+    "score": 8.9
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_24_stamp_watermark_rotated.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_24_stamp_watermark_rotated.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 55,
+    "images": 0,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "image/graphics"
+    ],
+    "score": 7.7
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_17_embedded_image_caption.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_17_embedded_image_caption.pdf",
+    "size_mb": 0.0,
+    "pages": 1,
+    "avg_text": 31,
+    "images": 1,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "image/graphics"
+    ],
+    "score": 7.7
+  },
+  {
+    "path": "/Users/admin/Works/pdf2docx/test/samples/demo-table-empty-cell.pdf",
+    "rel": "pdf2docx/test/samples/demo-table-empty-cell.pdf",
+    "size_mb": 3.67,
+    "pages": 5,
+    "avg_text": 909,
+    "images": 0,
+    "kind": "digital",
+    "tags": [
+      "pdf2docx-sample",
+      "table"
+    ],
+    "score": 8.27
+  },
+  {
+    "path": "/Users/admin/Works/pdf2docx/test/samples/demo-table.pdf",
+    "rel": "pdf2docx/test/samples/demo-table.pdf",
+    "size_mb": 0.1,
+    "pages": 1,
+    "avg_text": 1009,
+    "images": 1,
+    "kind": "digital",
+    "tags": [
+      "pdf2docx-sample",
+      "table"
+    ],
+    "score": 6.71
+  },
+  {
+    "path": "/Users/admin/Works/pdf2docx/test/samples/demo-table-close-underline.pdf",
+    "rel": "pdf2docx/test/samples/demo-table-close-underline.pdf",
+    "size_mb": 0.07,
+    "pages": 1,
+    "avg_text": 2815,
+    "images": 0,
+    "kind": "digital",
+    "tags": [
+      "pdf2docx-sample",
+      "table"
+    ],
+    "score": 6.71
+  },
+  {
+    "path": "/Users/admin/Works/pdf2docx/test/samples/demo-image-rotation.pdf",
+    "rel": "pdf2docx/test/samples/demo-image-rotation.pdf",
+    "size_mb": 0.69,
+    "pages": 1,
+    "avg_text": 0,
+    "images": 1,
+    "kind": "scanned/image",
+    "tags": [
+      "pdf2docx-sample",
+      "image/graphics"
+    ],
+    "score": 6.77
+  },
+  {
+    "path": "/Users/admin/Works/pdf2docx/test/samples/demo-image-colorspace.pdf",
+    "rel": "pdf2docx/test/samples/demo-image-colorspace.pdf",
+    "size_mb": 0.63,
+    "pages": 1,
+    "avg_text": 0,
+    "images": 6,
+    "kind": "scanned/image",
+    "tags": [
+      "pdf2docx-sample",
+      "image/graphics"
+    ],
+    "score": 6.76
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_30_legal_commercial_long_mix.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_30_legal_commercial_long_mix.pdf",
+    "size_mb": 0.01,
+    "pages": 4,
+    "avg_text": 83,
+    "images": 3,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "legal"
+    ],
+    "score": 8.6
+  },
+  {
+    "path": "/Users/admin/Works/docling/tests/data/vlm_docx_battle/case_22_legal_like_multipage.pdf",
+    "rel": "docling/tests/data/vlm_docx_battle/case_22_legal_like_multipage.pdf",
+    "size_mb": 0.0,
+    "pages": 3,
+    "avg_text": 60,
+    "images": 0,
+    "kind": "mixed/low-text",
+    "tags": [
+      "docling-battle",
+      "legal"
+    ],
+    "score": 8.3
+  },
+  {
+    "path": "/Users/admin/Works/glm-ocr-latest-test/input/contract_zh.pdf",
+    "rel": "glm-ocr-latest-test/input/contract_zh.pdf",
+    "size_mb": 0.22,
+    "pages": 4,
+    "avg_text": 451,
+    "images": 15,
+    "kind": "digital",
+    "tags": [
+      "scanned/ocr",
+      "legal",
+      "cjk"
+    ],
+    "score": 4.82
+  }
+]

@@ -124,73 +124,86 @@ def main():
         work_dir = Path(tempfile.mkdtemp(prefix='docir-pipeline-'))
     
     print(f"Working directory: {work_dir}")
+    model_json = None  # Only set for GLM-OCR path; digital direct path skips model JSON.
     
-    # Step 1: GLM-OCR
-    if not args.skip_ocr:
-        glmocr_output = work_dir / 'glmocr-output'
-        
-        # Check if uv is available
-        try:
-            subprocess.run(['uv', '--version'], capture_output=True, check=True)
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("Error: 'uv' command not found. Please install uv first.", file=sys.stderr)
-            sys.exit(1)
-        
-        # Run GLM-OCR pipeline
-        glmocr_cmd = [
-            'uv', 'run', '--extra', 'layout',
-            'glmocr', 'parse',
-            str(args.input_pdf),
-            '--mode', 'selfhosted',
-            '--layout-device', 'cpu',
-            '--set', 'pipeline.ocr_api.api_mode', 'ollama_generate',
-            '--set', 'pipeline.ocr_api.api_path', '/api/generate',
-            '--set', 'pipeline.ocr_api.api_host', 'localhost',
-            '--set', 'pipeline.ocr_api.api_port', '11434',
-            '--set', 'pipeline.ocr_api.model', 'glm-ocr:latest',
-            '--set', 'pipeline.layout.device', 'cpu',
-            '--output', str(glmocr_output),
-            '--log-level', 'INFO'
-        ]
-        
-        run_command(glmocr_cmd, "Step 1: GLM-OCR Pipeline")
-        
-        # Find the model JSON
-        pdf_stem = args.input_pdf.stem
-        model_json_candidates = list(glmocr_output.rglob(f'*{pdf_stem}*model.json'))
-        if not model_json_candidates:
-            print(f"Error: Could not find model JSON in {glmocr_output}", file=sys.stderr)
-            sys.exit(1)
-        
-        model_json = model_json_candidates[0]
-        print(f"✓ Found model JSON: {model_json}")
-    else:
-        if not args.glmocr_output:
-            print("Error: --glmocr-output required when using --skip-ocr", file=sys.stderr)
-            sys.exit(1)
-        
-        pdf_stem = args.input_pdf.stem
-        model_json_candidates = list(args.glmocr_output.rglob(f'*{pdf_stem}*model.json'))
-        if not model_json_candidates:
-            print(f"Error: Could not find model JSON in {args.glmocr_output}", file=sys.stderr)
-            sys.exit(1)
-        
-        model_json = model_json_candidates[0]
-        print(f"✓ Using existing model JSON: {model_json}")
-    
-    # Step 2: IR Builder
+    # Step 1/2: Build DocIR
     docir_xml = work_dir / f'{args.input_pdf.stem}.docir.xml'
     
-    ir_builder_cmd = [
-        sys.executable,
-        str(script_dir / 'builder' / 'ir_builder.py'),
-        str(model_json),
-        str(args.input_pdf),
-        '-o', str(docir_xml),
-        '--title', args.input_pdf.stem
-    ]
-    
-    run_command(ir_builder_cmd, "Step 2: IR Builder")
+    if args.digital:
+        # True digital fast path: bypass GLM-OCR/Ollama entirely.
+        digital_builder_cmd = [
+            sys.executable,
+            str(script_dir / 'builder' / 'digital_ir_builder.py'),
+            str(args.input_pdf),
+            '-o', str(docir_xml),
+            '--title', args.input_pdf.stem
+        ]
+        run_command(digital_builder_cmd, "Step 1: Digital IR Builder (PyMuPDF, no OCR)")
+    else:
+        # Step 1: GLM-OCR
+        if not args.skip_ocr:
+            glmocr_output = work_dir / 'glmocr-output'
+            
+            # Check if uv is available
+            try:
+                subprocess.run(['uv', '--version'], capture_output=True, check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print("Error: 'uv' command not found. Please install uv first.", file=sys.stderr)
+                sys.exit(1)
+            
+            # Run GLM-OCR pipeline
+            glmocr_cmd = [
+                'uv', 'run', '--extra', 'layout',
+                'glmocr', 'parse',
+                str(args.input_pdf),
+                '--mode', 'selfhosted',
+                '--layout-device', 'cpu',
+                '--set', 'pipeline.ocr_api.api_mode', 'ollama_generate',
+                '--set', 'pipeline.ocr_api.api_path', '/api/generate',
+                '--set', 'pipeline.ocr_api.api_host', 'localhost',
+                '--set', 'pipeline.ocr_api.api_port', '11434',
+                '--set', 'pipeline.ocr_api.model', 'glm-ocr:latest',
+                '--set', 'pipeline.layout.device', 'cpu',
+                '--output', str(glmocr_output),
+                '--log-level', 'INFO'
+            ]
+            
+            run_command(glmocr_cmd, "Step 1: GLM-OCR Pipeline")
+            
+            # Find the model JSON
+            pdf_stem = args.input_pdf.stem
+            model_json_candidates = list(glmocr_output.rglob(f'*{pdf_stem}*model.json'))
+            if not model_json_candidates:
+                print(f"Error: Could not find model JSON in {glmocr_output}", file=sys.stderr)
+                sys.exit(1)
+            
+            model_json = model_json_candidates[0]
+            print(f"✓ Found model JSON: {model_json}")
+        else:
+            if not args.glmocr_output:
+                print("Error: --glmocr-output required when using --skip-ocr", file=sys.stderr)
+                sys.exit(1)
+            
+            pdf_stem = args.input_pdf.stem
+            model_json_candidates = list(args.glmocr_output.rglob(f'*{pdf_stem}*model.json'))
+            if not model_json_candidates:
+                print(f"Error: Could not find model JSON in {args.glmocr_output}", file=sys.stderr)
+                sys.exit(1)
+            
+            model_json = model_json_candidates[0]
+            print(f"✓ Using existing model JSON: {model_json}")
+        
+        # Step 2: IR Builder from GLM-OCR model JSON
+        ir_builder_cmd = [
+            sys.executable,
+            str(script_dir / 'builder' / 'ir_builder.py'),
+            str(model_json),
+            str(args.input_pdf),
+            '-o', str(docir_xml),
+            '--title', args.input_pdf.stem
+        ]
+        
+        run_command(ir_builder_cmd, "Step 2: IR Builder")
     
     # Step 3: Style Extraction
     docir_styled = work_dir / f'{args.input_pdf.stem}-styled.docir.xml'
@@ -265,7 +278,10 @@ def main():
     print(f"Output DOCX:  {args.output}")
     print(f"Working dir:  {work_dir}")
     print(f"\nIntermediate files:")
-    print(f"  Model JSON:   {model_json}")
+    if args.digital:
+        print("  Model JSON:   <skipped: digital direct path>")
+    else:
+        print(f"  Model JSON:   {model_json}")
     print(f"  DocIR XML:    {docir_xml}")
     if not args.skip_style:
         print(f"  Styled XML:   {docir_styled}")

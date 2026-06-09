@@ -300,7 +300,16 @@ def extract_region_style_digital(
     
     # Calculate line height from font metrics
     # Use fontTools to get accurate ascender/descender if available
-    from style_extractor.font_metrics import get_line_height_ratio, normalize_font_name
+    try:
+        from style_extractor.font_metrics import get_line_height_ratio, normalize_font_name
+    except ModuleNotFoundError:
+        # Running this file directly makes sibling imports non-package imports.
+        import sys
+        from pathlib import Path
+        style_dir = Path(__file__).parent
+        if str(style_dir) not in sys.path:
+            sys.path.insert(0, str(style_dir))
+        from font_metrics import get_line_height_ratio, normalize_font_name
     
     # Get font family name for metrics lookup
     font_family = font_name.split('-')[0] if font_name else ''
