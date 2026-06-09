@@ -80,7 +80,12 @@ Return ONLY valid JSON with this schema:
   "score": 0-10,
   "verdict": "pass|borderline|fail",
   "human_acceptability": "acceptable|needs_minor_touchup|needs_major_rework|unusable",
-  "first_impression": "one sentence human reaction",
+  "first_impression": "one sentence human reaction, as if a person just opened both files side-by-side",
+  "human_delta_summary": "plain-language answer to: how different does the output feel from the original?",
+  "would_user_call_this_useless": true|false,
+  "uselessness_reason": "if true, explain why a normal user would feel the DOCX is 廢 / not worth using; if false, explain why it is still useful",
+  "manual_rework_estimate": "none|minutes|hours|rebuild_from_scratch",
+  "top_5_human_noticed_differences": ["the first things a human would notice, ordered by visibility"],
   "text_accuracy": 0-10,
   "layout_accuracy": 0-10,
   "typography_accuracy": 0-10,
@@ -88,7 +93,7 @@ Return ONLY valid JSON with this schema:
   "image_accuracy": 0-10,
   "editability_confidence": 0-10,
   "human_visible_defects": [
-    {"severity": "critical|major|minor", "area": "text|layout|typography|table|image|textbox|header_footer|editability", "description": "specific visible defect", "human_impact": "why a user would care"}
+    {"severity": "critical|major|minor", "area": "text|layout|typography|table|image|textbox|header_footer|editability", "description": "specific visible defect", "human_impact": "why a user would care", "likely_fix_priority": 1}
   ],
   "major_defects": ["..."],
   "minor_defects": ["..."],
@@ -97,12 +102,13 @@ Return ONLY valid JSON with this schema:
   "client_delivery_reason": "short reason"
 }
 
-Scoring guidance:
-- 9-10: nearly indistinguishable, editable, client-deliverable
-- 7-8: usable with minor human touch-up
-- 5-6: recognizable but not commercial/client quality
-- 0-4: severe missing content/layout collapse/unusable
-Be strict: missing tables/images, text overlap, wrong page geometry, missing CJK text, displaced text boxes, or screenshot-cheating are critical/major defects.
+Scoring guidance from a human's point of view:
+- 9-10: nearly indistinguishable, editable, client-deliverable; user feels impressed
+- 7-8: clearly useful, only minor touch-up; user would keep editing this DOCX
+- 5-6: recognizable but not commercial/client quality; user may feel disappointed but can salvage it
+- 3-4: technically produced a DOCX, but a human would likely say it looks bad / needs major rework
+- 0-2: severe missing content/layout collapse/unusable; a human would likely call the output 廢
+Be strict: missing tables/images, text overlap, wrong page geometry, missing CJK text, displaced text boxes, wrong reading order, clipped text, or screenshot-cheating are critical/major defects. Do not let "DOCX exists" count as quality.
 """
     payload = {
         "model": model,
@@ -176,6 +182,14 @@ def write_human_review_report(out_dir: Path, source_pdf: Path, output_docx: Path
         lines.append(f"- Client-deliverable: **{j.get('would_accept_for_client_delivery', '?')}**")
         if j.get("first_impression"):
             lines.append(f"- First impression: {j['first_impression']}")
+        if j.get("human_delta_summary"):
+            lines.append(f"- Human delta: {j['human_delta_summary']}")
+        if "would_user_call_this_useless" in j:
+            lines.append(f"- Would a user call this 廢/useless? **{j.get('would_user_call_this_useless')}**")
+        if j.get("uselessness_reason"):
+            lines.append(f"- Uselessness reason: {j['uselessness_reason']}")
+        if j.get("manual_rework_estimate"):
+            lines.append(f"- Manual rework estimate: **{j['manual_rework_estimate']}**")
         if j.get("client_delivery_reason"):
             lines.append(f"- Client delivery reason: {j['client_delivery_reason']}")
         lines.append("")
@@ -184,6 +198,12 @@ def write_human_review_report(out_dir: Path, source_pdf: Path, output_docx: Path
             if key in j:
                 lines.append(f"- {key}: {j[key]}/10")
         lines.append("")
+        visible_diffs = j.get("top_5_human_noticed_differences") or []
+        if visible_diffs:
+            lines.append("### Top human-noticed differences")
+            for diff in visible_diffs:
+                lines.append(f"- {diff}")
+            lines.append("")
         visible = j.get("human_visible_defects") or []
         if visible:
             lines.append("### Human-visible defects")
