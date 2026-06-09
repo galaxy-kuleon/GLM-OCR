@@ -448,6 +448,16 @@ def add_floating_text_box(doc: Document, region_elem, page_height_pt: float, cur
     tcW.set(qn('w:type'), 'dxa')
     tcPr.append(tcW)
     
+    # Tight text-box cell margins maximize usable width; otherwise source text
+    # near the right edge (e.g. CJK punctuation) can be clipped.
+    tcMar = OxmlElement('w:tcMar')
+    for margin_name in ['top', 'left', 'bottom', 'right']:
+        mar = OxmlElement(f'w:{margin_name}')
+        mar.set(qn('w:w'), '0')
+        mar.set(qn('w:type'), 'dxa')
+        tcMar.append(mar)
+    tcPr.append(tcMar)
+    
     # Clear default paragraph and add content
     cell.paragraphs[0].clear()
     
@@ -542,6 +552,8 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                 row_height_pts.append(float(row_elem.get('height_pt', '0')))
             except ValueError:
                 row_height_pts.append(0.0)
+    positive_row_heights = [h for h in row_height_pts if h > 0]
+    cell_margin_twips = '0' if positive_row_heights and min(positive_row_heights) <= 22 else '20'
     for col in table.columns:
         col.width = Pt(col_width_pt)
     for row_idx, row in enumerate(table.rows):
@@ -555,12 +567,13 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
             tcW.set(qn('w:w'), str(int(col_width_pt * 20)))
             tcW.set(qn('w:type'), 'dxa')
             tcPr.append(tcW)
-            # Match tight PDF table cells and prevent Word's default margins
-            # from forcing header wraps / row inflation.
+            # Use small PDF-like margins for normal tables, but remove margins
+            # for very tight source rows (<=22pt) where even 1pt makes header
+            # text wrap and corrupts the rendered table.
             tcMar = OxmlElement('w:tcMar')
             for margin_name in ['top', 'left', 'bottom', 'right']:
                 mar = OxmlElement(f'w:{margin_name}')
-                mar.set(qn('w:w'), '0')
+                mar.set(qn('w:w'), cell_margin_twips)
                 mar.set(qn('w:type'), 'dxa')
                 tcMar.append(mar)
             tcPr.append(tcMar)
@@ -685,8 +698,17 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         para = cell.add_paragraph()
                         para.paragraph_format.space_before = Pt(0)
                         para.paragraph_format.space_after = Pt(0)
-                        para.paragraph_format.line_spacing = 1.0
-                        for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
+                        run_elems = para_elem.findall(f'{{{DOCIR_NS}}}run')
+                        font_sizes = []
+                        for run_elem in run_elems:
+                            try:
+                                font_size = float(run_elem.get('font_size_pt', '0'))
+                                if font_size > 0:
+                                    font_sizes.append(font_size)
+                            except ValueError:
+                                pass
+                        para.paragraph_format.line_spacing = Pt(max(font_sizes) if font_sizes else 12)
+                        for run_elem in run_elems:
                             text = run_elem.text or ''
                             run = para.add_run(text)
                             apply_run_style(run, run_elem, region_elem)
@@ -735,8 +757,17 @@ def add_positioned_table_region(doc: Document, region_elem, page_height_pt: floa
                         para = cell.add_paragraph()
                         para.paragraph_format.space_before = Pt(0)
                         para.paragraph_format.space_after = Pt(0)
-                        para.paragraph_format.line_spacing = 1.0
-                        for run_elem in para_elem.findall(f'{{{DOCIR_NS}}}run'):
+                        run_elems = para_elem.findall(f'{{{DOCIR_NS}}}run')
+                        font_sizes = []
+                        for run_elem in run_elems:
+                            try:
+                                font_size = float(run_elem.get('font_size_pt', '0'))
+                                if font_size > 0:
+                                    font_sizes.append(font_size)
+                            except ValueError:
+                                pass
+                        para.paragraph_format.line_spacing = Pt(max(font_sizes) if font_sizes else 12)
+                        for run_elem in run_elems:
                             text = run_elem.text or ''
                             run = para.add_run(text)
                             apply_run_style(run, run_elem, region_elem)
